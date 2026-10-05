@@ -1,0 +1,263 @@
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["fullTextIndex"]
+}
+
+enum Role {
+  FOUNDER
+  SEEKER
+  BOTH
+}
+
+enum Availability {
+  FULL
+  PART
+  WEEKEND
+}
+
+enum CompensationPref {
+  EQUITY
+  SALARY
+  REV_SHARE
+}
+
+enum Visibility {
+  PUBLIC
+  VERIFIED_ONLY
+}
+
+enum RequirementStatus {
+  ACTIVE
+  PAUSED
+  CLOSED
+}
+
+enum InterestStatus {
+  PENDING
+  ACCEPTED
+  LATER
+  DECLINED
+  WITHDRAWN
+}
+
+enum VerificationType {
+  EMAIL
+  PHONE
+  LINKEDIN
+}
+
+model User {
+  id                  String               @id @default(uuid())
+  email               String               @unique
+  passwordHash        String
+  role                Role                 @default(BOTH)
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+
+  profile             Profile?
+  commitmentProfile   CommitmentProfile?
+  requirements        Requirement[]
+  interestsSent       Interest[]           @relation("CandidateInterests")
+  connectionsA        Connection[]         @relation("UserAConnections")
+  connectionsB        Connection[]         @relation("UserBConnections")
+  messagesSent        Message[]
+  verificationRecords VerificationRecord[]
+  blocksSent          Block[]              @relation("Blocker")
+  blocksReceived      Block[]              @relation("Blocked")
+  reportsSent         Report[]
+  pushTokens          PushToken[]
+  refreshTokens       RefreshToken[]
+
+  @@map("users")
+}
+
+model Profile {
+  id              String   @id @default(uuid())
+  userId          String   @unique
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name            String
+  city            String?
+  ageRange        String?
+  industry        String?
+  bio             String?  @db.Text
+  skills          Json?
+  experienceYears Int?
+  previousStartup Boolean  @default(false)
+  currentWork     String?
+  shareablePhone  String?
+  shareableEmail  String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("profiles")
+}
+
+model CommitmentProfile {
+  id                String            @id @default(uuid())
+  userId            String            @unique
+  user              User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  hoursPerWeek      Int?
+  availability      Availability?
+  minMonths         Int?
+  canInvestAmount   Decimal?          @db.Decimal(12, 2)
+  contributes       Json?
+  equityExpectation Int?
+  compensationPref  CompensationPref?
+  remote            Boolean           @default(true)
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  @@map("commitment_profiles")
+}
+
+model Requirement {
+  id               String            @id @default(uuid())
+  ownerId          String
+  owner            User              @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  title            String
+  needSkill        String
+  startupName      String?
+  industry         String
+  stage            String
+  currentUsers     Int               @default(0)
+  ownerContributes String?
+  offer            String?
+  commitment       String?
+  location         String?
+  remote           Boolean           @default(true)
+  visibility       Visibility        @default(PUBLIC)
+  status           RequirementStatus @default(ACTIVE)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  interests        Interest[]
+
+  @@fulltext([title, industry, needSkill])
+  @@map("requirements")
+}
+
+model Interest {
+  id            String         @id @default(uuid())
+  requirementId String
+  requirement   Requirement    @relation(fields: [requirementId], references: [id], onDelete: Cascade)
+  candidateId   String
+  candidate     User           @relation("CandidateInterests", fields: [candidateId], references: [id], onDelete: Cascade)
+  status        InterestStatus @default(PENDING)
+  score         Float?
+  breakdown     Json?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  connection    Connection?
+
+  @@unique([requirementId, candidateId])
+  @@map("interests")
+}
+
+model Connection {
+  id             String        @id @default(uuid())
+  userAId        String
+  userA          User          @relation("UserAConnections", fields: [userAId], references: [id], onDelete: Cascade)
+  userBId        String
+  userB          User          @relation("UserBConnections", fields: [userBId], references: [id], onDelete: Cascade)
+  interestId     String        @unique
+  interest       Interest      @relation(fields: [interestId], references: [id], onDelete: Cascade)
+  contactSharedA Boolean       @default(false)
+  contactSharedB Boolean       @default(false)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  conversation   Conversation?
+
+  @@map("connections")
+}
+
+model Conversation {
+  id           String     @id @default(uuid())
+  connectionId String     @unique
+  connection   Connection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  messages     Message[]
+
+  @@map("conversations")
+}
+
+model Message {
+  id             String       @id @default(uuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderId       String
+  sender         User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  body           String       @db.Text
+  createdAt      DateTime     @default(now())
+  readAt         DateTime?
+
+  @@map("messages")
+}
+
+model VerificationRecord {
+  id         String           @id @default(uuid())
+  userId     String
+  user       User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type       VerificationType
+  verifiedAt DateTime?
+  method     String
+  createdAt  DateTime         @default(now())
+
+  @@map("verification_records")
+}
+
+model Block {
+  id        String   @id @default(uuid())
+  blockerId String
+  blocker   User     @relation("Blocker", fields: [blockerId], references: [id], onDelete: Cascade)
+  blockedId String
+  blocked   User     @relation("Blocked", fields: [blockedId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([blockerId, blockedId])
+  @@map("blocks")
+}
+
+model Report {
+  id         String   @id @default(uuid())
+  reporterId String
+  reporter   User     @relation(fields: [reporterId], references: [id], onDelete: Cascade)
+  targetType String
+  targetId   String
+  reason     String
+  createdAt  DateTime @default(now())
+
+  @@map("reports")
+}
+
+model PushToken {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String
+  platform  String
+  createdAt DateTime @default(now())
+
+  @@unique([userId, platform])
+  @@map("push_tokens")
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@map("refresh_tokens")
+}
