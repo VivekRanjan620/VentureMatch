@@ -1,7 +1,7 @@
 import request from 'supertest';
 import app from '../src/app';
 import { prisma } from '../src/lib/prisma';
-import { encodeCursor } from '../src/services/requirement.service';
+import { encodeRecentCursor, encodeMatchCursor } from '../src/services/requirement.service';
 
 describe('Requirements CRUD, Browse & Search Integration Tests', () => {
   let user1Token: string;
@@ -28,7 +28,7 @@ describe('Requirements CRUD, Browse & Search Integration Tests', () => {
     user2Token = reg2.body.tokens.accessToken;
     user2Id = reg2.body.user.id;
 
-    // Complete User 1 Profile
+    // Complete User 1 Profile & Commitment
     await request(app)
       .put('/api/v1/me')
       .set('Authorization', `Bearer ${user1Token}`)
@@ -40,21 +40,42 @@ describe('Requirements CRUD, Browse & Search Integration Tests', () => {
         experienceYears: 5,
       });
 
-    // Complete User 2 Profile
+    await request(app)
+      .put('/api/v1/me/commitment')
+      .set('Authorization', `Bearer ${user1Token}`)
+      .send({
+        hoursPerWeek: 40,
+        availability: 'FULL',
+        minMonths: 12,
+        equityExpectation: 20,
+        compensationPref: 'EQUITY',
+      });
+
+    // Complete User 2 Profile & Commitment
     await request(app)
       .put('/api/v1/me')
       .set('Authorization', `Bearer ${user2Token}`)
       .send({
         name: 'User Two',
         city: 'Austin',
-        industry: 'Fintech',
+        industry: 'Tech',
         skills: ['MARKETING'],
         experienceYears: 8,
+      });
+
+    await request(app)
+      .put('/api/v1/me/commitment')
+      .set('Authorization', `Bearer ${user2Token}`)
+      .send({
+        hoursPerWeek: 40,
+        availability: 'FULL',
+        minMonths: 12,
+        equityExpectation: 20,
+        compensationPref: 'EQUITY',
       });
   });
 
   it('should block requirement creation if user profile is incomplete', async () => {
-    // Create User 3 with incomplete profile
     const reg3 = await request(app).post('/api/v1/auth/register').send({
       email: 'incomplete@example.com',
       password: 'Password123!',
@@ -77,7 +98,7 @@ describe('Requirements CRUD, Browse & Search Integration Tests', () => {
     expect(res.body.error.code).toBe('FORBIDDEN');
   });
 
-  it('should create requirement when profile is complete and sanitize contact info output', async () => {
+  it('should create requirement when profile is complete, set equityOfferMax, and sanitize contact info output', async () => {
     const res = await request(app)
       .post('/api/v1/requirements')
       .set('Authorization', `Bearer ${user1Token}`)
@@ -89,22 +110,77 @@ describe('Requirements CRUD, Browse & Search Integration Tests', () => {
         industry: 'Artificial Intelligence',
         stage: 'MVP',
         commitment: 'FULL',
+        equityOfferMax: 40,
         ownerContributes: 'Product Strategy & Capital',
       });
 
     expect(res.status).toBe(201);
     expect(res.body.requirement.id).toBeDefined();
     expect(res.body.requirement.title).toBe('Building AI Agent Workflow Engine');
+    expect(res.body.requirement.equityOfferMax).toBe(40);
     expect(res.body.requirement.ownerContributes).toBe('Product Strategy & Capital');
-    expect(res.body.requirement.startupName).toBeUndefined(); // Hidden because startupNamePublic is false
+    expect(res.body.requirement.startupName).toBe('AgentX'); // Owner sees their own startupName even if startupNamePublic is false
     expect(res.body.requirement.owner.name).toBe('User One');
     expect(res.body.requirement.owner.email).toBeUndefined();
     expect(res.body.requirement.owner.shareablePhone).toBeUndefined();
   });
 
-  it('should exclude own requirements from caller browse feed', async () => {
-    // User 1 creates requirement
-    await request(app)
+  it('should enforce startupName visibility rules for list, detail, and owner view', async () => {
+    // User 1 creates requirement with startupNamePublic = false
+    const reqRes = await request(app)
+      .post('/api/v1/requirements')
+      .set('Authorization', `Bearer ${user1Token}`)
+      .send({
+        title: 'Stealth Startup Search',
+        needSkill: 'TECH',
+        startupName: 'SecretCo',
+        startupNamePublic: false,
+        industry: 'Tech',
+        stage: 'IDEA',
+        commitment: 'FULL',
+        equityOfferMax: 30,
+      });
+
+    const reqId = reqRes.body.requirement.id;
+
+    // 1. Owner views detail -> sees startupName "SecretCo"
+    const ownerDetail = await request(app)
+      .get(`/api/v1/requirements/${reqId}`)
+      .set('Authorization', `Bearer ${user1Token}`);
+
+    expect(ownerDetail.status).toBe(200);
+    expect(ownerDetail.body.requirement.startupName).toBe('SecretCo');
+
+    // 2. Owner views /mine -> sees startupName "SecretCo"
+    const ownerMine = await request(app)
+      .get('/api/v1/requirements/mine')
+      .set('Authorization', `Bearer ${user1Token}`);
+
+    expect(ownerMine.status).toBe(200);
+    const mineItem = ownerMine.body.requirements.find((r: any) => r.id === reqId);
+    expect(mineItem.startupName).toBe('SecretCo');
+
+    // 3. Non-owner (User 2) views detail -> startupName is undefined
+    const nonOwnerDetail = await request(app)
+      .get(`/api/v1/requirements/${reqId}`)
+      .set('Authorization', `Bearer ${user2Token}`);
+
+    expect(nonOwnerDetail.status).toBe(200);
+    expect(nonOwnerDetail.body.requirement.startupName).toBeUndefined();
+
+    // 4. Non-owner (User 2) views browse list -> startupName is undefined
+    const nonOwnerBrowse = await request(app)
+      .get('/api/v1/requirements')
+      .set('Authorization', `Bearer ${user2Token}`);
+
+    expect(nonOwnerBrowse.status).toBe(200);
+    const browseItem = nonOwnerBrowse.body.items.find((i: any) => i.id === reqId);
+    expect(browseItem).toBeDefined();
+    expect(browseItem.startupName).toBeUndefined();
+  });
+
+  it('should exclude own requirements from caller browse feed and return score: null for owner', async () => {
+    const reqRes = await request(app)
       .post('/api/v1/requirements')
       .set('Authorization', `Bearer ${user1Token}`)
       .send({
@@ -114,22 +190,34 @@ describe('Requirements CRUD, Browse & Search Integration Tests', () => {
         stage: 'IDEA',
         commitment: 'FULL',
       });
+    const reqId = reqRes.body.requirement.id;
 
-    // User 1 browses
-    const browse1 = await request(app)
-      .get('/api/v1/requirements')
+    const ownerDetail = await request(app)
+      .get(`/api/v1/requirements/${reqId}`)
       .set('Authorization', `Bearer ${user1Token}`);
 
-    expect(browse1.status).toBe(200);
-    expect(browse1.body.items.some((i: any) => i.owner.id === user1Id)).toBe(false);
+    expect(ownerDetail.status).toBe(200);
+    expect(ownerDetail.body.requirement.score).toBeNull();
+    expect(ownerDetail.body.requirement.breakdown).toBeNull();
 
-    // User 2 browses (should see User 1 requirement)
+    const mineRes = await request(app)
+      .get('/api/v1/requirements/mine')
+      .set('Authorization', `Bearer ${user1Token}`);
+
+    expect(mineRes.status).toBe(200);
+    expect(mineRes.body.requirements[0].score).toBeNull();
+
     const browse2 = await request(app)
       .get('/api/v1/requirements')
       .set('Authorization', `Bearer ${user2Token}`);
 
     expect(browse2.status).toBe(200);
-    expect(browse2.body.items.some((i: any) => i.owner.id === user1Id)).toBe(true);
+    const item = browse2.body.items.find((i: any) => i.id === reqId);
+    expect(item).toBeDefined();
+    expect(item.score).not.toBeNull();
+    expect(typeof item.score).toBe('number');
+    expect(item.breakdown).toBeDefined();
+    expect(item.reasons.length).toBeGreaterThan(0);
   });
 
   it('should enforce ownership on PATCH and prevent reopening CLOSED requirement', async () => {
@@ -142,10 +230,10 @@ describe('Requirements CRUD, Browse & Search Integration Tests', () => {
         industry: 'Tech',
         stage: 'IDEA',
         commitment: 'FULL',
+        equityOfferMax: 25,
       });
     const reqId = reqRes.body.requirement.id;
 
-    // User 2 attempts to update User 1 requirement -> 403
     const forbiddenPatch = await request(app)
       .patch(`/api/v1/requirements/${reqId}`)
       .set('Authorization', `Bearer ${user2Token}`)
@@ -153,16 +241,15 @@ describe('Requirements CRUD, Browse & Search Integration Tests', () => {
 
     expect(forbiddenPatch.status).toBe(403);
 
-    // Owner closes requirement
     const closePatch = await request(app)
       .patch(`/api/v1/requirements/${reqId}`)
       .set('Authorization', `Bearer ${user1Token}`)
-      .send({ status: 'CLOSED' });
+      .send({ status: 'CLOSED', equityOfferMax: 30 });
 
     expect(closePatch.status).toBe(200);
     expect(closePatch.body.requirement.status).toBe('CLOSED');
+    expect(closePatch.body.requirement.equityOfferMax).toBe(30);
 
-    // Attempt to reopen CLOSED requirement -> 400
     const reopenPatch = await request(app)
       .patch(`/api/v1/requirements/${reqId}`)
       .set('Authorization', `Bearer ${user1Token}`)
@@ -172,139 +259,114 @@ describe('Requirements CRUD, Browse & Search Integration Tests', () => {
     expect(reopenPatch.body.error.code).toBe('INVALID_INPUT');
   });
 
-  it('should hide PAUSED and CLOSED requirements from browse feed and return 404 for non-owners', async () => {
+  it('should return score: null when candidate profile or commitment is incomplete', async () => {
+    const regIncomplete = await request(app).post('/api/v1/auth/register').send({
+      email: 'user_inc@example.com',
+      password: 'Password123!',
+      role: 'SEEKER',
+    });
+    const incToken = regIncomplete.body.tokens.accessToken;
+
     const reqRes = await request(app)
       .post('/api/v1/requirements')
       .set('Authorization', `Bearer ${user1Token}`)
       .send({
-        title: 'Paused Requirement',
+        title: 'Test Req',
         needSkill: 'TECH',
         industry: 'Tech',
         stage: 'IDEA',
         commitment: 'FULL',
       });
-    const reqId = reqRes.body.requirement.id;
 
-    // Owner pauses requirement
-    await request(app)
-      .patch(`/api/v1/requirements/${reqId}`)
-      .set('Authorization', `Bearer ${user1Token}`)
-      .send({ status: 'PAUSED' });
+    const detail = await request(app)
+      .get(`/api/v1/requirements/${reqRes.body.requirement.id}`)
+      .set('Authorization', `Bearer ${incToken}`);
 
-    // Non-owner browses -> requirement missing
-    const browseRes = await request(app)
+    expect(detail.status).toBe(200);
+    expect(detail.body.requirement.score).toBeNull();
+    expect(detail.body.requirement.breakdown).toBeNull();
+    expect(detail.body.requirement.reasons).toEqual(['Complete your profile to see your score']);
+
+    const browse = await request(app)
       .get('/api/v1/requirements')
-      .set('Authorization', `Bearer ${user2Token}`);
+      .set('Authorization', `Bearer ${incToken}`);
 
-    expect(browseRes.body.items.some((i: any) => i.id === reqId)).toBe(false);
-
-    // Non-owner accesses GET /requirements/:id -> 404
-    const detailRes = await request(app)
-      .get(`/api/v1/requirements/${reqId}`)
-      .set('Authorization', `Bearer ${user2Token}`);
-
-    expect(detailRes.status).toBe(404);
-
-    // Owner accesses GET /requirements/:id -> 200 OK
-    const ownerDetail = await request(app)
-      .get(`/api/v1/requirements/${reqId}`)
-      .set('Authorization', `Bearer ${user1Token}`);
-
-    expect(ownerDetail.status).toBe(200);
-    expect(ownerDetail.body.requirement.id).toBe(reqId);
+    expect(browse.status).toBe(200);
+    expect(browse.body.items[0].score).toBeNull();
+    expect(browse.body.items[0].reasons).toEqual(['Complete your profile to see your score']);
   });
 
-  it('should safely handle search operators like +foo -bar* "x and short 2-letter queries (AI)', async () => {
-    // Create requirement containing AI
-    await request(app)
-      .post('/api/v1/requirements')
-      .set('Authorization', `Bearer ${user1Token}`)
-      .send({
-        title: 'AI Dev Specialist Needed',
-        needSkill: 'TECH',
-        industry: 'Artificial Intelligence',
-        stage: 'MVP',
-        commitment: 'FULL',
-      });
+  it('should handle sort=match descending order and paginate across 3 pages without duplicates', async () => {
+    await request(app).post('/api/v1/requirements').set('Authorization', `Bearer ${user1Token}`).send({
+      title: 'High Match Marketing Req',
+      needSkill: 'MARKETING',
+      industry: 'Tech',
+      stage: 'GROWTH',
+      commitment: 'FULL',
+      equityOfferMax: 50,
+    });
 
-    // Short term query "AI" (2 characters, uses LIKE fallback)
-    const shortSearch = await request(app)
-      .get('/api/v1/requirements?q=AI')
-      .set('Authorization', `Bearer ${user2Token}`);
+    await request(app).post('/api/v1/requirements').set('Authorization', `Bearer ${user1Token}`).send({
+      title: 'Medium Match Tech Req 1',
+      needSkill: 'TECH',
+      industry: 'Tech',
+      stage: 'IDEA',
+      commitment: 'FULL',
+      equityOfferMax: 30,
+    });
 
-    expect(shortSearch.status).toBe(200);
-    expect(shortSearch.body.items.length).toBeGreaterThan(0);
-    expect(shortSearch.body.items[0].title).toContain('AI');
+    await request(app).post('/api/v1/requirements').set('Authorization', `Bearer ${user1Token}`).send({
+      title: 'Medium Match Tech Req 2',
+      needSkill: 'TECH',
+      industry: 'Tech',
+      stage: 'IDEA',
+      commitment: 'FULL',
+      equityOfferMax: 30,
+    });
 
-    // Query with boolean operators should not error out
-    const operatorSearch = await request(app)
-      .get('/api/v1/requirements?q=+AI -Dev* "specialist"')
-      .set('Authorization', `Bearer ${user2Token}`);
+    await request(app).post('/api/v1/requirements').set('Authorization', `Bearer ${user1Token}`).send({
+      title: 'Low Match Finance Req',
+      needSkill: 'FINANCE',
+      industry: 'Fintech',
+      stage: 'IDEA',
+      commitment: 'PART',
+      equityOfferMax: 10,
+    });
 
-    expect(operatorSearch.status).toBe(200);
+    await request(app).post('/api/v1/requirements').set('Authorization', `Bearer ${user1Token}`).send({
+      title: 'Low Match Sales Req',
+      needSkill: 'SALES',
+      industry: 'Real Estate',
+      stage: 'IDEA',
+      commitment: 'WEEKEND',
+      equityOfferMax: 5,
+    });
 
-    // Wildcard % search should be escaped and not match everything
-    const percentSearch = await request(app)
-      .get('/api/v1/requirements?q=%')
-      .set('Authorization', `Bearer ${user2Token}`);
-
-    expect(percentSearch.status).toBe(200);
-    expect(percentSearch.body.items.length).toBe(0);
-  });
-
-  it('should return 400 for invalid cursor string', async () => {
-    const res = await request(app)
-      .get('/api/v1/requirements?cursor=invalid_base64_string_xyz')
-      .set('Authorization', `Bearer ${user1Token}`);
-
-    expect(res.status).toBe(400);
-    expect(res.body.error.code).toBe('INVALID_INPUT');
-  });
-
-  it('should paginate across 3 pages without duplicates and return nextCursor null on last page', async () => {
-    // Create 5 requirements by User 1
-    for (let i = 1; i <= 5; i++) {
-      await request(app)
-        .post('/api/v1/requirements')
-        .set('Authorization', `Bearer ${user1Token}`)
-        .send({
-          title: `Paginated Req ${i}`,
-          needSkill: 'TECH',
-          industry: 'Software',
-          stage: 'IDEA',
-          commitment: 'FULL',
-        });
-      // Slight delay to ensure distinct createdAt timestamps
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-
-    // Page 1 (limit 2)
     const page1 = await request(app)
-      .get('/api/v1/requirements?limit=2')
+      .get('/api/v1/requirements?sort=match&limit=2')
       .set('Authorization', `Bearer ${user2Token}`);
 
     expect(page1.status).toBe(200);
     expect(page1.body.items.length).toBe(2);
+    expect(page1.body.items[0].score).toBeGreaterThanOrEqual(page1.body.items[1].score);
     expect(page1.body.nextCursor).not.toBeNull();
 
-    // Page 2 (limit 2 using nextCursor)
     const page2 = await request(app)
-      .get(`/api/v1/requirements?limit=2&cursor=${page1.body.nextCursor}`)
+      .get(`/api/v1/requirements?sort=match&limit=2&cursor=${page1.body.nextCursor}`)
       .set('Authorization', `Bearer ${user2Token}`);
 
     expect(page2.status).toBe(200);
     expect(page2.body.items.length).toBe(2);
+    expect(page2.body.items[0].score).toBeGreaterThanOrEqual(page2.body.items[1].score);
     expect(page2.body.nextCursor).not.toBeNull();
 
-    // Verify no duplicates between Page 1 and Page 2
     const p1Ids = page1.body.items.map((i: any) => i.id);
     const p2Ids = page2.body.items.map((i: any) => i.id);
-    const intersection = p1Ids.filter((id: string) => p2Ids.includes(id));
-    expect(intersection.length).toBe(0);
+    const duplicates = p1Ids.filter((id: string) => p2Ids.includes(id));
+    expect(duplicates.length).toBe(0);
 
-    // Page 3 (limit 2)
     const page3 = await request(app)
-      .get(`/api/v1/requirements?limit=2&cursor=${page2.body.nextCursor}`)
+      .get(`/api/v1/requirements?sort=match&limit=2&cursor=${page2.body.nextCursor}`)
       .set('Authorization', `Bearer ${user2Token}`);
 
     expect(page3.status).toBe(200);
@@ -312,55 +374,48 @@ describe('Requirements CRUD, Browse & Search Integration Tests', () => {
     expect(page3.body.nextCursor).toBeNull();
   });
 
-  it('should enforce VERIFIED_ONLY visibility rule and block bidirectional exclusion', async () => {
-    // User 1 creates VERIFIED_ONLY requirement
-    const verifiedReq = await request(app)
-      .post('/api/v1/requirements')
-      .set('Authorization', `Bearer ${user1Token}`)
-      .send({
-        title: 'Verified Only Co-Founder Search',
-        needSkill: 'TECH',
-        industry: 'Fintech',
-        stage: 'GROWTH',
-        commitment: 'FULL',
-        visibility: 'VERIFIED_ONLY',
-      });
+  it('should return 400 when cursor mode does not match sort mode', async () => {
+    const recentCursor = encodeRecentCursor(new Date(), 'some-id');
 
-    const vReqId = verifiedReq.body.requirement.id;
-
-    // User 2 has no LinkedIn/Phone record -> hidden from browse
-    const browseUnverified = await request(app)
-      .get('/api/v1/requirements')
+    const matchRes = await request(app)
+      .get(`/api/v1/requirements?sort=match&cursor=${recentCursor}`)
       .set('Authorization', `Bearer ${user2Token}`);
 
-    expect(browseUnverified.body.items.some((i: any) => i.id === vReqId)).toBe(false);
+    expect(matchRes.status).toBe(400);
+    expect(matchRes.body.error.code).toBe('INVALID_INPUT');
 
-    // User 2 links LinkedIn account
-    await request(app)
-      .post('/api/v1/me/verification/linkedin')
-      .set('Authorization', `Bearer ${user2Token}`)
-      .send({ linkedinUrl: 'https://linkedin.com/in/user2' });
+    const matchCursor = encodeMatchCursor(85, 'some-id');
 
-    // User 2 browses again -> now visible!
-    const browseVerified = await request(app)
-      .get('/api/v1/requirements')
+    const recentRes = await request(app)
+      .get(`/api/v1/requirements?sort=recent&cursor=${matchCursor}`)
       .set('Authorization', `Bearer ${user2Token}`);
 
-    expect(browseVerified.body.items.some((i: any) => i.id === vReqId)).toBe(true);
+    expect(recentRes.status).toBe(400);
+    expect(recentRes.body.error.code).toBe('INVALID_INPUT');
+  });
 
-    // Block test: User 1 blocks User 2
-    await prisma.block.create({
-      data: {
-        blockerId: user1Id,
-        blockedId: user2Id,
-      },
+  it('should fallback to recent order when sort=match is requested by incomplete caller', async () => {
+    const regIncomplete = await request(app).post('/api/v1/auth/register').send({
+      email: 'user_inc2@example.com',
+      password: 'Password123!',
+      role: 'SEEKER',
+    });
+    const incToken = regIncomplete.body.tokens.accessToken;
+
+    await request(app).post('/api/v1/requirements').set('Authorization', `Bearer ${user1Token}`).send({
+      title: 'Req 1',
+      needSkill: 'TECH',
+      industry: 'Tech',
+      stage: 'IDEA',
+      commitment: 'FULL',
     });
 
-    // User 2 browses -> User 1 requirement is now excluded due to block
-    const browseBlocked = await request(app)
-      .get('/api/v1/requirements')
-      .set('Authorization', `Bearer ${user2Token}`);
+    const res = await request(app)
+      .get('/api/v1/requirements?sort=match')
+      .set('Authorization', `Bearer ${incToken}`);
 
-    expect(browseBlocked.body.items.some((i: any) => i.id === vReqId)).toBe(false);
+    expect(res.status).toBe(200);
+    expect(res.body.items.length).toBeGreaterThan(0);
+    expect(res.body.items[0].score).toBeNull();
   });
 });

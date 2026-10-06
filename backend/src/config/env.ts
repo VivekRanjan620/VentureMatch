@@ -23,3 +23,14 @@ if (!parsed.success) {
 }
 
 export const env = parsed.data;
+
+let capOverride: number | null = null;
+
+export const getDailyInterestCap = (): number => {
+  if (capOverride !== null) return capOverride;
+  return parsed.data.DAILY_INTEREST_CAP;
+};
+
+export const setDailyInterestCapOverride = (cap: number | null): void => {
+  capOverride = cap;
+};

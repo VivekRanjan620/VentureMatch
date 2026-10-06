@@ -104,21 +104,15 @@ $registerBody = @{
 Invoke-RestMethod -Uri "http://localhost:4000/api/v1/auth/register" -Method Post -ContentType "application/json" -Body $registerBody
 ```
 
-### Login (Seeded User)
-```powershell
-$loginBody = @{
-    email = "alex.founder@example.com"
-    password = "Password123!"
-} | ConvertTo-Json
-
-$res = Invoke-RestMethod -Uri "http://localhost:4000/api/v1/auth/login" -Method Post -ContentType "application/json" -Body $loginBody
-$res
-```
-
-### Browse Requirements by Recommendation Score (`sort=match`)
+### Express Interest in a Requirement
 ```powershell
 $headers = @{
     Authorization = "Bearer $($res.tokens.accessToken)"
 }
-Invoke-RestMethod -Uri "http://localhost:4000/api/v1/requirements?sort=match&limit=10" -Method Get -Headers $headers
+Invoke-RestMethod -Uri "http://localhost:4000/api/v1/requirements/<requirement-id>/interest" -Method Post -Headers $headers -ContentType "application/json" -Body "{}"
+```
+
+### Share Contact Information
+```powershell
+Invoke-RestMethod -Uri "http://localhost:4000/api/v1/connections/<connection-id>/share-contact" -Method Post -Headers $headers
 ```

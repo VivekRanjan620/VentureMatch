@@ -34,6 +34,14 @@ export class AppError extends Error {
     return new AppError(409, ERROR_CODES.CONFLICT, message);
   }
 
+  static rateLimitReached(message = 'Daily limit reached'): AppError {
+    return new AppError(429, ERROR_CODES.DAILY_LIMIT_REACHED, message);
+  }
+
+  static invalidTransition(message = 'Invalid status transition'): AppError {
+    return new AppError(409, ERROR_CODES.INVALID_TRANSITION, message);
+  }
+
   static internal(message = 'Internal server error'): AppError {
     return new AppError(500, ERROR_CODES.INTERNAL_SERVER_ERROR, message);
   }

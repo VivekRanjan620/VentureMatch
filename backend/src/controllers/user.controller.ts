@@ -20,7 +20,10 @@ const updateProfileSchema = z
       .max(70, 'Invalid experience years'),
     previousStartup: z.boolean().optional(),
     currentWork: z.string().optional(),
-    shareablePhone: z.string().optional(),
+    shareablePhone: z
+      .string()
+      .regex(/^\+?[0-9\s\-]{8,20}$/, 'Invalid phone number format (8-15 digits)')
+      .optional(),
     shareableEmail: z.string().email('Invalid shareable email format').optional(),
   })
   .strict();

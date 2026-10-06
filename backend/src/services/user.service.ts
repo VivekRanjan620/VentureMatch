@@ -141,6 +141,8 @@ export class UserService {
   }
 
   static async updateProfile(userId: string, data: UpdateProfileInput) {
+    const normalizedPhone = data.shareablePhone ? data.shareablePhone.replace(/[\s\-()]/g, '') : undefined;
+
     const profile = await prisma.profile.upsert({
       where: { userId },
       create: {
@@ -154,7 +156,7 @@ export class UserService {
         experienceYears: data.experienceYears,
         previousStartup: data.previousStartup ?? false,
         currentWork: data.currentWork,
-        shareablePhone: data.shareablePhone,
+        shareablePhone: normalizedPhone,
         shareableEmail: data.shareableEmail,
       },
       update: {
@@ -167,7 +169,7 @@ export class UserService {
         experienceYears: data.experienceYears,
         previousStartup: data.previousStartup ?? false,
         currentWork: data.currentWork,
-        shareablePhone: data.shareablePhone,
+        shareablePhone: normalizedPhone,
         shareableEmail: data.shareableEmail,
       },
     });
