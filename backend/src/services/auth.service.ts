@@ -43,6 +43,7 @@ export class AuthService {
           create: {
             type: 'EMAIL',
             method: 'self-declared',
+            verifiedAt: null,
           },
         },
       },

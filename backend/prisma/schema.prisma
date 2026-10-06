@@ -116,28 +116,33 @@ model CommitmentProfile {
 }
 
 model Requirement {
-  id               String            @id @default(uuid())
-  ownerId          String
-  owner            User              @relation(fields: [ownerId], references: [id], onDelete: Cascade)
-  title            String
-  needSkill        String
-  startupName      String?
-  industry         String
-  stage            String
-  currentUsers     Int               @default(0)
-  ownerContributes String?
-  offer            String?
-  commitment       String?
-  location         String?
-  remote           Boolean           @default(true)
-  visibility       Visibility        @default(PUBLIC)
-  status           RequirementStatus @default(ACTIVE)
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
+  id                String            @id @default(uuid())
+  ownerId           String
+  owner             User              @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  title             String
+  needSkill         String
+  startupName       String?
+  startupNamePublic Boolean           @default(false)
+  industry          String
+  stage             String
+  currentUsers      Int               @default(0)
+  ownerContributes  String?
+  offer             String?
+  commitment        String?
+  location          String?
+  remote            Boolean           @default(true)
+  visibility        Visibility        @default(PUBLIC)
+  status            RequirementStatus @default(ACTIVE)
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
 
   interests        Interest[]
 
   @@fulltext([title, industry, needSkill])
+  @@index([status, createdAt])
+  @@index([needSkill])
+  @@index([stage])
+  @@index([ownerId])
   @@map("requirements")
 }
 

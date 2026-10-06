@@ -230,20 +230,21 @@ async function main() {
     },
   });
 
-  // Create sample requirements
+  // Create sample requirements for seeded users
   await prisma.requirement.create({
     data: {
       ownerId: founder1.id,
       title: 'CTO & Co-Founder for AI Workflow Automation',
       needSkill: 'TECH',
       startupName: 'AgenticFlow',
+      startupNamePublic: true,
       industry: 'Artificial Intelligence',
-      stage: 'Seed / Pre-revenue',
+      stage: 'MVP',
       currentUsers: 150,
       ownerContributes: 'Product Strategy, 100k angel funding raised, sales pipeline',
       offer: '40-50% Equity',
-      commitment: 'Full-time (40+ hrs/wk)',
-      location: 'San Francisco, CA / Remote',
+      commitment: 'FULL',
+      location: 'San Francisco, CA',
       remote: true,
       visibility: Visibility.PUBLIC,
       status: RequirementStatus.ACTIVE,
@@ -256,14 +257,35 @@ async function main() {
       title: 'Growth & Marketing Co-Founder for Cross-Border Fintech',
       needSkill: 'MARKETING',
       startupName: 'PayGlobal',
+      startupNamePublic: false,
       industry: 'Fintech',
-      stage: 'Series A / Revenue Generating',
+      stage: 'GROWTH',
       currentUsers: 12000,
       ownerContributes: '$500k ARR, 1x Exit Founder, Core tech platform',
       offer: '20-30% Equity + Revenue Share',
-      commitment: 'Full-time preferred',
+      commitment: 'FULL',
       location: 'Austin, TX',
       remote: false,
+      visibility: Visibility.PUBLIC,
+      status: RequirementStatus.ACTIVE,
+    },
+  });
+
+  await prisma.requirement.create({
+    data: {
+      ownerId: seeker3.id,
+      title: 'Technical Co-Founder for AI Design Assistant',
+      needSkill: 'TECH',
+      startupName: 'DesignAI',
+      startupNamePublic: true,
+      industry: 'Design & AI',
+      stage: 'IDEA',
+      currentUsers: 0,
+      ownerContributes: 'UI/UX Design, User Research',
+      offer: '35-50% Equity',
+      commitment: 'PART',
+      location: 'Toronto, Canada',
+      remote: true,
       visibility: Visibility.PUBLIC,
       status: RequirementStatus.ACTIVE,
     },

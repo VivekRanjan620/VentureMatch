@@ -22,21 +22,32 @@ All error responses strictly adhere to the following JSON shape:
 ```
 
 ### Common Error Codes
-- `INVALID_INPUT`: Request body or parameters failed Zod validation (details contains issues).
+- `INVALID_INPUT`: Request body or parameters failed Zod validation or invalid cursor format.
 - `UNAUTHORIZED`: Missing, invalid, or expired JWT access token.
-- `FORBIDDEN`: User does not have permission to access or modify this resource.
-- `NOT_FOUND`: The requested resource was not found.
-- `CONFLICT`: Resource already exists (e.g., email already registered).
+- `FORBIDDEN`: User does not have permission (e.g. incomplete profile, modifying another user's requirement, reopening closed requirement, or unverified access to VERIFIED_ONLY requirement).
+- `NOT_FOUND`: The requested resource was not found (or requirement is PAUSED/CLOSED for non-owners, or blocked).
+- `CONFLICT`: Resource already exists.
 - `RATE_LIMIT_EXCEEDED`: Too many requests submitted in a given window.
 - `INTERNAL_SERVER_ERROR`: Unexpected server error.
 
 ---
 
-## Allowed Skills Specification
+## Canonical Enums & Allowed Values
 
-Skill values across profiles and requirements must be selected from the following canonical list (`config/skills.ts`):
-
+### 1. Skills (`config/skills.ts`)
 `TECH` | `MARKETING` | `SALES` | `FINANCE` | `OPERATIONS` | `PRODUCT` | `DESIGN` | `OTHER`
+
+### 2. Startup Stages (`config/stages.ts`)
+`IDEA` | `MVP` | `EARLY_TRACTION` | `GROWTH`
+
+### 3. Commitment Options
+`FULL` | `PART` | `WEEKEND`
+
+### 4. Visibility Options
+`PUBLIC` | `VERIFIED_ONLY`
+
+### 5. Requirement Statuses
+`ACTIVE` | `PAUSED` | `CLOSED`
 
 ---
 
@@ -59,298 +70,227 @@ Calculated dynamically on `GET /me`:
 Verification records indicate account linking or self-declared contact methods. They are **never** labeled as `"verified"`:
 
 - **EMAIL**: `{ type: "EMAIL", status: "unverified", method: "self-declared", verifiedAt: null }`
-- **LINKEDIN**: `{ type: "LINKEDIN", status: "linked", method: "linked-only", verifiedAt: null, linkedAt: "ISO-String" }` *(Note: Represents profile/account linking only, NOT official identity verification)*.
+- **LINKEDIN**: `{ type: "LINKEDIN", status: "linked", method: "linked-only", verifiedAt: null, linkedAt: "ISO-String" }`
 
 ---
 
-## Auth Endpoints
+## Requirements API
 
-### 1. Register User
-- **POST** `/auth/register`
-- **Auth Required**: No
+### 1. Create Requirement (`POST /requirements`)
+- **POST** `/requirements`
+- **Auth Required**: Yes (`Bearer <accessToken>`)
+- **Pre-requisite**: Requires `profileComplete === true`. Returns `403 FORBIDDEN` if profile is incomplete.
+- **Strict Zod Payload**: `.strict()`
 
 #### Request Body
 ```json
 {
-  "email": "founder@example.com",
-  "password": "Password123!",
-  "role": "FOUNDER" // "FOUNDER" | "SEEKER" | "BOTH"
+  "title": "CTO & Technical Co-Founder for AI Engine",
+  "needSkill": "TECH",
+  "startupName": "AgenticFlow",
+  "startupNamePublic": true, // Default: false
+  "industry": "Artificial Intelligence",
+  "stage": "MVP", // "IDEA" | "MVP" | "EARLY_TRACTION" | "GROWTH"
+  "currentUsers": 150,
+  "ownerContributes": "Product Strategy, 100k angel funding raised",
+  "offer": "40-50% Equity",
+  "commitment": "FULL", // "FULL" | "PART" | "WEEKEND"
+  "location": "San Francisco, CA",
+  "remote": true, // Default: true
+  "visibility": "PUBLIC" // "PUBLIC" | "VERIFIED_ONLY"
 }
 ```
 
 #### Success Response (`201 Created`)
-Creates user and automatically creates an initial `EMAIL` verification record (`method: "self-declared"`).
+Returns requirement DTO. Note: `startupName` is returned ONLY if `startupNamePublic === true`. Owner contact info is NEVER included.
 
 ```json
 {
-  "user": {
+  "requirement": {
     "id": "uuid-v4-string",
-    "email": "founder@example.com",
-    "role": "FOUNDER",
-    "createdAt": "2026-10-05T12:00:00.000Z"
-  },
-  "tokens": {
-    "accessToken": "jwt-access-token-string",
-    "refreshToken": "jwt-refresh-token-string",
-    "expiresIn": 900
-  }
-}
-```
-
----
-
-### 2. Login
-- **POST** `/auth/login`
-- **Auth Required**: No
-
-#### Request Body
-```json
-{
-  "email": "founder@example.com",
-  "password": "Password123!"
-}
-```
-
-#### Success Response (`200 OK`)
-```json
-{
-  "user": {
-    "id": "uuid-v4-string",
-    "email": "founder@example.com",
-    "role": "FOUNDER",
-    "createdAt": "2026-10-05T12:00:00.000Z"
-  },
-  "tokens": {
-    "accessToken": "jwt-access-token-string",
-    "refreshToken": "jwt-refresh-token-string",
-    "expiresIn": 900
-  }
-}
-```
-
----
-
-### 3. Refresh Tokens
-- **POST** `/auth/refresh`
-- **Auth Required**: No
-
-#### Request Body
-```json
-{
-  "refreshToken": "jwt-refresh-token-string"
-}
-```
-
-#### Success Response (`200 OK`)
-```json
-{
-  "tokens": {
-    "accessToken": "new-jwt-access-token-string",
-    "refreshToken": "new-jwt-refresh-token-string",
-    "expiresIn": 900
-  }
-}
-```
-
----
-
-### 4. Logout
-- **POST** `/auth/logout`
-- **Auth Required**: No
-
-#### Request Body
-```json
-{
-  "refreshToken": "jwt-refresh-token-string"
-}
-```
-
----
-
-## User & Profile Endpoints
-
-### 1. Get Current User (`/me`)
-- **GET** `/me`
-- **Auth Required**: Yes (`Bearer <accessToken>`)
-
-#### Success Response (`200 OK`)
-Never returns `passwordHash` or `refreshTokens`.
-
-```json
-{
-  "user": {
-    "id": "uuid-v4-string",
-    "email": "founder@example.com",
-    "role": "FOUNDER",
+    "title": "CTO & Technical Co-Founder for AI Engine",
+    "needSkill": "TECH",
+    "industry": "Artificial Intelligence",
+    "stage": "MVP",
+    "currentUsers": 150,
+    "ownerContributes": "Product Strategy, 100k angel funding raised",
+    "offer": "40-50% Equity",
+    "commitment": "FULL",
+    "location": "San Francisco, CA",
+    "remote": true,
     "createdAt": "2026-10-05T12:00:00.000Z",
-    "updatedAt": "2026-10-05T12:00:00.000Z",
-    "profileComplete": true,
-    "commitmentComplete": true,
-    "profile": {
+    "status": "ACTIVE",
+    "visibility": "PUBLIC",
+    "startupName": "AgenticFlow",
+    "owner": {
       "id": "uuid-v4-string",
-      "userId": "uuid-v4-string",
       "name": "Alex Rivera",
       "city": "San Francisco, CA",
-      "ageRange": "28-34",
-      "industry": "Artificial Intelligence",
-      "bio": "Serial entrepreneur building dev tools.",
-      "skills": ["PRODUCT", "TECH", "SALES"],
-      "experienceYears": 8,
-      "previousStartup": true,
-      "currentWork": "Building VentureMatch",
-      "shareablePhone": "+1-555-0192",
-      "shareableEmail": "alex.rivera@example.com"
-    },
-    "commitmentProfile": {
+      "badges": ["EMAIL_DECLARED"]
+    }
+  }
+}
+```
+
+---
+
+### 2. Browse Requirements (`GET /requirements`)
+- **GET** `/requirements`
+- **Auth Required**: Yes (`Bearer <accessToken>`)
+
+#### Query Parameters
+- `q` (`string`, optional): Search query.
+  - Terms ≥ 3 chars: Uses MySQL FULLTEXT search (`MATCH(title, industry, needSkill) AGAINST(:term IN BOOLEAN MODE)`). Strips boolean operators (`+ - < > ( ) ~ * " @`).
+  - Terms < 3 chars (e.g. `"AI"`): Uses `LIKE` search on `title`, `industry`, or `needSkill` with wildcard escaping.
+- `skill` (`string`, optional): Filter by canonical skill (e.g. `TECH`).
+- `stage` (`string`, optional): Filter by stage (`IDEA`, `MVP`, `EARLY_TRACTION`, `GROWTH`).
+- `commitment` (`string`, optional): Filter by commitment (`FULL`, `PART`, `WEEKEND`).
+- `location` (`string`, optional): Filter by location substring.
+- `remote` (`boolean`, optional): `true` or `false`.
+- `sort` (`string`, optional): `recent` (default). `match` is accepted but reserved for Step 4.
+- `cursor` (`string`, optional): Base64-encoded opaque cursor string `{ createdAt, id }`. Returns `400 INVALID_INPUT` if invalid.
+- `limit` (`number`, optional): Items per page (default: 20, max: 50).
+
+#### Browse Filtering Rules
+- Returns ONLY `status === "ACTIVE"` requirements.
+- Excludes requirements owned by the calling user.
+- Excludes requirements owned by users blocked in either direction (`Block` table).
+- Excludes `VERIFIED_ONLY` requirements if calling user has no `LINKEDIN` or `PHONE` verification record.
+
+#### Success Response (`200 OK`)
+```json
+{
+  "items": [
+    {
       "id": "uuid-v4-string",
-      "userId": "uuid-v4-string",
-      "hoursPerWeek": 50,
-      "availability": "FULL",
-      "minMonths": 12,
-      "canInvestAmount": 25000,
-      "contributes": ["PRODUCT", "FINANCE"],
-      "equityExpectation": 50,
-      "compensationPref": "EQUITY",
-      "remote": true
-    },
-    "verificationRecords": [
-      {
+      "title": "CTO & Technical Co-Founder for AI Engine",
+      "needSkill": "TECH",
+      "industry": "Artificial Intelligence",
+      "stage": "MVP",
+      "currentUsers": 150,
+      "ownerContributes": "Product Strategy, 100k angel funding raised",
+      "offer": "40-50% Equity",
+      "commitment": "FULL",
+      "location": "San Francisco, CA",
+      "remote": true,
+      "createdAt": "2026-10-05T12:00:00.000Z",
+      "status": "ACTIVE",
+      "visibility": "PUBLIC",
+      "owner": {
         "id": "uuid-v4-string",
-        "type": "EMAIL",
-        "status": "unverified",
-        "method": "self-declared",
-        "verifiedAt": null
+        "name": "Alex Rivera",
+        "city": "San Francisco, CA",
+        "badges": ["EMAIL_DECLARED", "LINKEDIN_LINKED"]
       }
-    ]
+    }
+  ],
+  "nextCursor": "eyJjcmVhdGVkQXQiOiIyMDI2LTEwLTA1VDEyOjAwOjAwLjAwMFoiLCJpZCI6InV1aWQtdjQtc3RyaW5nIn0=" // null on last page
+}
+```
+
+---
+
+### 3. Get My Owned Requirements (`GET /requirements/mine`)
+- **GET** `/requirements/mine`
+- **Auth Required**: Yes (`Bearer <accessToken>`)
+
+#### Success Response (`200 OK`)
+Returns list of all requirements owned by the authenticated user sorted by `createdAt desc` (includes `ACTIVE`, `PAUSED`, and `CLOSED` items).
+
+```json
+{
+  "requirements": [
+    {
+      "id": "uuid-v4-string",
+      "title": "CTO & Technical Co-Founder for AI Engine",
+      "needSkill": "TECH",
+      "industry": "Artificial Intelligence",
+      "stage": "MVP",
+      "currentUsers": 150,
+      "offer": "40-50% Equity",
+      "commitment": "FULL",
+      "location": "San Francisco, CA",
+      "remote": true,
+      "createdAt": "2026-10-05T12:00:00.000Z",
+      "status": "ACTIVE",
+      "visibility": "PUBLIC",
+      "startupName": "AgenticFlow",
+      "owner": {
+        "id": "uuid-v4-string",
+        "name": "Alex Rivera",
+        "city": "San Francisco, CA",
+        "badges": ["EMAIL_DECLARED"]
+      }
+    }
+  ]
+}
+```
+
+---
+
+### 4. Get Single Requirement Detail (`GET /requirements/:id`)
+- **GET** `/requirements/:id`
+- **Auth Required**: Yes (`Bearer <accessToken>`)
+
+#### Rules
+- Returns `404 NOT_FOUND` if requirement does not exist, if blocked in either direction, OR if `status !== "ACTIVE"` and caller is not the owner.
+- Returns `403 FORBIDDEN` if requirement is `VERIFIED_ONLY` and caller is not the owner and has no `LINKEDIN` or `PHONE` verification record.
+
+#### Success Response (`200 OK`)
+```json
+{
+  "requirement": {
+    "id": "uuid-v4-string",
+    "title": "CTO & Technical Co-Founder for AI Engine",
+    "needSkill": "TECH",
+    "industry": "Artificial Intelligence",
+    "stage": "MVP",
+    "currentUsers": 150,
+    "offer": "40-50% Equity",
+    "commitment": "FULL",
+    "location": "San Francisco, CA",
+    "remote": true,
+    "createdAt": "2026-10-05T12:00:00.000Z",
+    "status": "ACTIVE",
+    "visibility": "PUBLIC",
+    "owner": {
+      "id": "uuid-v4-string",
+      "name": "Alex Rivera",
+      "city": "San Francisco, CA",
+      "badges": ["EMAIL_DECLARED"]
+    }
   }
 }
 ```
 
 ---
 
-### 2. Update Profile (`PUT /me`)
-- **PUT** `/me`
+### 5. Update Requirement (`PATCH /requirements/:id`)
+- **PATCH** `/requirements/:id`
 - **Auth Required**: Yes (`Bearer <accessToken>`)
-- **Strict Zod Payload**: Rejects unknown fields (`role`, `id`, `userId`, etc.)
+- **Owner Only**: Returns `403 FORBIDDEN` if caller is not the owner.
+- **Strict Zod Payload**: `.strict()` (whitelist: cannot pass `id`, `ownerId`, `createdAt`).
+
+#### Status Transition Rules
+- `ACTIVE` ↔ `PAUSED` allowed.
+- `ACTIVE` / `PAUSED` ➔ `CLOSED` allowed.
+- `CLOSED` requirements **cannot** be reopened (attempting to change status of a `CLOSED` requirement returns `400 INVALID_INPUT`).
 
 #### Request Body
 ```json
 {
-  "name": "Alex Rivera",
-  "city": "San Francisco, CA",
-  "ageRange": "28-34",
-  "industry": "Artificial Intelligence",
-  "bio": "Serial entrepreneur building dev tools.",
-  "skills": ["PRODUCT", "TECH"],
-  "experienceYears": 8,
-  "previousStartup": true,
-  "currentWork": "Founder & CEO",
-  "shareablePhone": "+1-555-0192",
-  "shareableEmail": "alex@example.com"
+  "title": "Updated Requirement Title",
+  "status": "PAUSED" // "ACTIVE" | "PAUSED" | "CLOSED"
 }
 ```
 
 #### Success Response (`200 OK`)
 ```json
 {
-  "profile": {
+  "requirement": {
     "id": "uuid-v4-string",
-    "userId": "uuid-v4-string",
-    "name": "Alex Rivera",
-    "city": "San Francisco, CA",
-    "skills": ["PRODUCT", "TECH"],
-    "experienceYears": 8
+    "title": "Updated Requirement Title",
+    "status": "PAUSED"
   }
 }
 ```
-
----
-
-### 3. Get Commitment Profile (`GET /me/commitment`)
-- **GET** `/me/commitment`
-- **Auth Required**: Yes (`Bearer <accessToken>`)
-
-#### Success Response (`200 OK`)
-```json
-{
-  "commitment": {
-    "id": "uuid-v4-string",
-    "userId": "uuid-v4-string",
-    "hoursPerWeek": 50,
-    "availability": "FULL",
-    "minMonths": 12,
-    "canInvestAmount": 25000,
-    "contributes": ["PRODUCT", "FINANCE"],
-    "equityExpectation": 50,
-    "compensationPref": "EQUITY",
-    "remote": true
-  }
-}
-```
-
----
-
-### 4. Update Commitment Profile (`PUT /me/commitment`)
-- **PUT** `/me/commitment`
-- **Auth Required**: Yes (`Bearer <accessToken>`)
-- **Strict Zod Payload**: Rejects unknown fields.
-
-#### Request Body
-```json
-{
-  "hoursPerWeek": 50,
-  "availability": "FULL",
-  "minMonths": 12,
-  "canInvestAmount": 25000,
-  "contributes": ["PRODUCT", "FINANCE"],
-  "equityExpectation": 50, // Integer 0-100
-  "compensationPref": "EQUITY", // "EQUITY" | "SALARY" | "REV_SHARE"
-  "remote": true
-}
-```
-
-#### Success Response (`200 OK`)
-```json
-{
-  "commitment": {
-    "id": "uuid-v4-string",
-    "userId": "uuid-v4-string",
-    "hoursPerWeek": 50,
-    "equityExpectation": 50
-  }
-}
-```
-
----
-
-### 5. Link LinkedIn Account Stub (`POST /me/verification/linkedin`)
-- **POST** `/me/verification/linkedin`
-- **Auth Required**: Yes (`Bearer <accessToken>`)
-
-#### Request Body
-```json
-{
-  "linkedinUrl": "https://linkedin.com/in/alexrivera"
-}
-```
-
-#### Success Response (`200 OK`)
-```json
-{
-  "verification": {
-    "id": "uuid-v4-string",
-    "type": "LINKEDIN",
-    "status": "linked",
-    "method": "linked-only",
-    "linkedinUrl": "https://linkedin.com/in/alexrivera",
-    "verifiedAt": null,
-    "linkedAt": "2026-10-05T12:00:00.000Z"
-  }
-}
-```
-
----
-
-## Health Check Endpoint
-- **GET** `/health`
-- **Auth Required**: No
