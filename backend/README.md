@@ -69,9 +69,9 @@ The server will start on `http://localhost:4000`.
 
 ---
 
-## Running Integration Tests
+## Running Integration & Unit Tests
 
-Integration tests run using Jest and Supertest against a dedicated test database (`venturematch_test`). The test runner includes a safety guard that **refuses to run** if `DATABASE_URL` does not contain `_test`.
+Tests run using Jest and Supertest against a dedicated test database (`venturematch_test`). The test runner includes a safety guard that **refuses to run** if `DATABASE_URL` does not contain `_test`.
 
 ### 1. Setup Test Database (One-time setup)
 ```powershell
@@ -115,46 +115,10 @@ $res = Invoke-RestMethod -Uri "http://localhost:4000/api/v1/auth/login" -Method 
 $res
 ```
 
-### Get Current User Profile & Completeness (`/me`)
+### Browse Requirements by Recommendation Score (`sort=match`)
 ```powershell
 $headers = @{
     Authorization = "Bearer $($res.tokens.accessToken)"
 }
-Invoke-RestMethod -Uri "http://localhost:4000/api/v1/me" -Method Get -Headers $headers
-```
-
-### Update Profile (`PUT /me`)
-```powershell
-$profileBody = @{
-    name = "Alex Rivera"
-    city = "San Francisco, CA"
-    industry = "Artificial Intelligence"
-    skills = @("PRODUCT", "TECH")
-    experienceYears = 8
-} | ConvertTo-Json
-
-Invoke-RestMethod -Uri "http://localhost:4000/api/v1/me" -Method Put -Headers $headers -ContentType "application/json" -Body $profileBody
-```
-
-### Update Commitment (`PUT /me/commitment`)
-```powershell
-$commitmentBody = @{
-    hoursPerWeek = 40
-    availability = "FULL"
-    minMonths = 12
-    canInvestAmount = 25000
-    equityExpectation = 50
-    compensationPref = "EQUITY"
-} | ConvertTo-Json
-
-Invoke-RestMethod -Uri "http://localhost:4000/api/v1/me/commitment" -Method Put -Headers $headers -ContentType "application/json" -Body $commitmentBody
-```
-
-### Link LinkedIn Stub (`POST /me/verification/linkedin`)
-```powershell
-$linkedinBody = @{
-    linkedinUrl = "https://linkedin.com/in/alexrivera"
-} | ConvertTo-Json
-
-Invoke-RestMethod -Uri "http://localhost:4000/api/v1/me/verification/linkedin" -Method Post -Headers $headers -ContentType "application/json" -Body $linkedinBody
+Invoke-RestMethod -Uri "http://localhost:4000/api/v1/requirements?sort=match&limit=10" -Method Get -Headers $headers
 ```

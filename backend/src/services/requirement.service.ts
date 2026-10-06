@@ -1,8 +1,10 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { AppError } from '../lib/errors';
-import { checkProfileComplete } from './user.service';
+import { checkProfileComplete, checkCommitmentComplete } from './user.service';
 import { Availability, Visibility, RequirementStatus } from '@prisma/client';
+import { score, BreakdownItem } from './matching.service';
+import { MATCH_CONFIG } from '../config/matching';
 
 export interface CreateRequirementInput {
   title: string;
@@ -14,6 +16,7 @@ export interface CreateRequirementInput {
   currentUsers?: number;
   ownerContributes?: string;
   offer?: string;
+  equityOfferMax?: number;
   commitment: Availability;
   location?: string;
   remote?: boolean;
@@ -30,6 +33,7 @@ export interface UpdateRequirementInput {
   currentUsers?: number;
   ownerContributes?: string;
   offer?: string;
+  equityOfferMax?: number;
   commitment?: Availability;
   location?: string;
   remote?: boolean;
@@ -58,6 +62,7 @@ export interface RequirementDTO {
   currentUsers: number;
   ownerContributes: string | null;
   offer: string | null;
+  equityOfferMax: number | null;
   commitment: string | null;
   location: string | null;
   remote: boolean;
@@ -71,10 +76,25 @@ export interface RequirementDTO {
     city: string | null;
     badges: string[];
   };
+  score?: number | null;
+  breakdown?: Record<string, BreakdownItem> | null;
+  reasons?: string[];
+}
+
+export interface RecentCursorPayload {
+  mode: 'recent';
+  createdAt: string;
+  id: string;
+}
+
+export interface MatchCursorPayload {
+  mode: 'match';
+  score: number | null;
+  id: string;
 }
 
 // Map Prisma Requirement + Owner model into a safe DTO
-export const mapToRequirementDTO = (reqRecord: any): RequirementDTO => {
+export const mapToRequirementDTO = (reqRecord: any, requestingUserId?: string): RequirementDTO => {
   const owner = reqRecord.owner || {};
   const ownerProfile = owner.profile || {};
   const verifications = owner.verificationRecords || [];
@@ -86,6 +106,11 @@ export const mapToRequirementDTO = (reqRecord: any): RequirementDTO => {
     if (v.type === 'PHONE') badges.push('PHONE_LINKED');
   }
 
+  const isOwner = Boolean(
+    requestingUserId &&
+      (reqRecord.ownerId === requestingUserId || owner.id === requestingUserId),
+  );
+
   const dto: RequirementDTO = {
     id: reqRecord.id,
     title: reqRecord.title,
@@ -95,6 +120,7 @@ export const mapToRequirementDTO = (reqRecord: any): RequirementDTO => {
     currentUsers: reqRecord.currentUsers,
     ownerContributes: reqRecord.ownerContributes || null,
     offer: reqRecord.offer || null,
+    equityOfferMax: reqRecord.equityOfferMax ?? null,
     commitment: reqRecord.commitment || null,
     location: reqRecord.location || null,
     remote: reqRecord.remote,
@@ -109,29 +135,54 @@ export const mapToRequirementDTO = (reqRecord: any): RequirementDTO => {
     },
   };
 
-  if (reqRecord.startupNamePublic) {
+  // Rule: startupName is returned ONLY IF startupNamePublic is true OR caller is the owner!
+  if (reqRecord.startupNamePublic || isOwner) {
     dto.startupName = reqRecord.startupName || null;
   }
 
   return dto;
 };
 
-// Helper to encode/decode opaque base64 cursor
-export const encodeCursor = (createdAt: Date | string, id: string): string => {
+// Opaque base64 cursor encoders and decoders
+export const encodeRecentCursor = (createdAt: Date | string, id: string): string => {
   const isoStr = createdAt instanceof Date ? createdAt.toISOString() : new Date(createdAt).toISOString();
-  const payload = JSON.stringify({ createdAt: isoStr, id });
-  return Buffer.from(payload, 'utf-8').toString('base64');
+  const payload: RecentCursorPayload = { mode: 'recent', createdAt: isoStr, id };
+  return Buffer.from(JSON.stringify(payload), 'utf-8').toString('base64');
 };
 
-export const decodeCursor = (cursorStr: string): { createdAt: Date; id: string } => {
+export const encodeMatchCursor = (score: number | null, id: string): string => {
+  const payload: MatchCursorPayload = { mode: 'match', score, id };
+  return Buffer.from(JSON.stringify(payload), 'utf-8').toString('base64');
+};
+
+export const decodeCursor = (cursorStr: string, expectedMode: 'recent' | 'match'): RecentCursorPayload | MatchCursorPayload => {
   try {
     const jsonStr = Buffer.from(cursorStr, 'base64').toString('utf-8');
     const parsed = JSON.parse(jsonStr);
-    if (!parsed.createdAt || !parsed.id || isNaN(Date.parse(parsed.createdAt))) {
-      throw new Error();
+
+    if (!parsed || typeof parsed !== 'object' || !parsed.id) {
+      throw new Error('Invalid cursor shape');
     }
-    return { createdAt: new Date(parsed.createdAt), id: parsed.id };
-  } catch (_e) {
+
+    const mode = parsed.mode || (parsed.createdAt ? 'recent' : 'match');
+
+    if (mode !== expectedMode) {
+      throw AppError.badRequest('Invalid cursor for sort mode');
+    }
+
+    if (expectedMode === 'recent') {
+      if (!parsed.createdAt || isNaN(Date.parse(parsed.createdAt))) {
+        throw new Error('Invalid recent cursor createdAt');
+      }
+      return { mode: 'recent', createdAt: parsed.createdAt, id: parsed.id };
+    } else {
+      const scoreVal = parsed.score !== undefined && parsed.score !== null ? Number(parsed.score) : null;
+      return { mode: 'match', score: scoreVal, id: parsed.id };
+    }
+  } catch (err: any) {
+    if (err instanceof AppError) {
+      throw err;
+    }
     throw AppError.badRequest('Invalid cursor format');
   }
 };
@@ -143,7 +194,6 @@ export const sanitizeSearchQuery = (q: string): string => {
 
 export class RequirementService {
   static async createRequirement(userId: string, data: CreateRequirementInput): Promise<RequirementDTO> {
-    // Check if user's profile is complete
     const user = await prisma.user.findUnique({
       where: { id: userId },
       include: { profile: true },
@@ -165,6 +215,7 @@ export class RequirementService {
         currentUsers: data.currentUsers ?? 0,
         ownerContributes: data.ownerContributes,
         offer: data.offer,
+        equityOfferMax: data.equityOfferMax,
         commitment: data.commitment,
         location: data.location,
         remote: data.remote ?? true,
@@ -175,13 +226,18 @@ export class RequirementService {
         owner: {
           include: {
             profile: true,
+            commitmentProfile: true,
             verificationRecords: true,
           },
         },
       },
     });
 
-    return mapToRequirementDTO(created);
+    const dto = mapToRequirementDTO(created, userId);
+    dto.score = null;
+    dto.breakdown = null;
+    dto.reasons = [];
+    return dto;
   }
 
   static async getMyRequirements(userId: string): Promise<RequirementDTO[]> {
@@ -192,13 +248,20 @@ export class RequirementService {
         owner: {
           include: {
             profile: true,
+            commitmentProfile: true,
             verificationRecords: true,
           },
         },
       },
     });
 
-    return list.map(mapToRequirementDTO);
+    return list.map((item) => {
+      const dto = mapToRequirementDTO(item, userId);
+      dto.score = null;
+      dto.breakdown = null;
+      dto.reasons = [];
+      return dto;
+    });
   }
 
   static async getRequirementById(id: string, requestingUserId: string): Promise<RequirementDTO> {
@@ -208,6 +271,7 @@ export class RequirementService {
         owner: {
           include: {
             profile: true,
+            commitmentProfile: true,
             verificationRecords: true,
           },
         },
@@ -218,7 +282,6 @@ export class RequirementService {
       throw AppError.notFound('Requirement not found');
     }
 
-    // Block check (bidirectional)
     const block = await prisma.block.findFirst({
       where: {
         OR: [
@@ -234,12 +297,10 @@ export class RequirementService {
 
     const isOwner = req.ownerId === requestingUserId;
 
-    // Rule 1: GET /requirements/:id for PAUSED/CLOSED returns 404 to non-owner
     if (!isOwner && req.status !== RequirementStatus.ACTIVE) {
       throw AppError.notFound('Requirement not found');
     }
 
-    // Rule 3: VERIFIED_ONLY requirement returns 403 if requester has no LINKEDIN or PHONE verification
     if (!isOwner && req.visibility === Visibility.VERIFIED_ONLY) {
       const verifications = await prisma.verificationRecord.findMany({
         where: {
@@ -253,7 +314,44 @@ export class RequirementService {
       }
     }
 
-    return mapToRequirementDTO(req);
+    const dto = mapToRequirementDTO(req, requestingUserId);
+
+    if (isOwner) {
+      dto.score = null;
+      dto.breakdown = null;
+      dto.reasons = [];
+    } else {
+      const requesterUser = await prisma.user.findUnique({
+        where: { id: requestingUserId },
+        include: { profile: true, commitmentProfile: true },
+      });
+
+      const scoreRes = score(
+        {
+          profile: requesterUser?.profile,
+          commitment: requesterUser?.commitmentProfile,
+        },
+        {
+          needSkill: req.needSkill,
+          industry: req.industry,
+          stage: req.stage,
+          equityOfferMax: req.equityOfferMax,
+          commitment: req.commitment,
+          location: req.location,
+          remote: req.remote,
+        },
+        {
+          profile: req.owner.profile,
+          commitment: req.owner.commitmentProfile,
+        },
+      );
+
+      dto.score = scoreRes.score;
+      dto.breakdown = scoreRes.breakdown;
+      dto.reasons = scoreRes.reasons;
+    }
+
+    return dto;
   }
 
   static async updateRequirement(
@@ -273,7 +371,6 @@ export class RequirementService {
       throw AppError.forbidden('You do not have permission to modify this requirement');
     }
 
-    // Rule 6: CLOSED requirements cannot be reopened
     if (req.status === RequirementStatus.CLOSED && data.status && data.status !== RequirementStatus.CLOSED) {
       throw AppError.badRequest('CLOSED requirements cannot be reopened');
     }
@@ -290,6 +387,7 @@ export class RequirementService {
         currentUsers: data.currentUsers,
         ownerContributes: data.ownerContributes,
         offer: data.offer,
+        equityOfferMax: data.equityOfferMax,
         commitment: data.commitment,
         location: data.location,
         remote: data.remote,
@@ -300,13 +398,18 @@ export class RequirementService {
         owner: {
           include: {
             profile: true,
+            commitmentProfile: true,
             verificationRecords: true,
           },
         },
       },
     });
 
-    return mapToRequirementDTO(updated);
+    const dto = mapToRequirementDTO(updated, requestingUserId);
+    dto.score = null;
+    dto.breakdown = null;
+    dto.reasons = [];
+    return dto;
   }
 
   static async browseRequirements(
@@ -315,16 +418,18 @@ export class RequirementService {
   ): Promise<{ items: RequirementDTO[]; nextCursor: string | null }> {
     const limit = Math.min(Math.max(params.limit || 20, 1), 50);
 
-    // 1. Check requester verification for VERIFIED_ONLY access
-    const requesterVerifications = await prisma.verificationRecord.findMany({
-      where: {
-        userId: requestingUserId,
-        type: { in: ['LINKEDIN', 'PHONE'] },
-      },
+    const requesterUser = await prisma.user.findUnique({
+      where: { id: requestingUserId },
+      include: { profile: true, commitmentProfile: true, verificationRecords: true },
     });
-    const canSeeVerifiedOnly = requesterVerifications.length > 0;
 
-    // 2. Fetch bidirectional block user IDs
+    const requesterVerifications = requesterUser?.verificationRecords || [];
+    const canSeeVerifiedOnly = requesterVerifications.some((v) => v.type === 'LINKEDIN' || v.type === 'PHONE');
+
+    const isCallerProfileComplete = checkProfileComplete(requesterUser?.profile);
+    const isCallerCommitmentComplete = checkCommitmentComplete(requesterUser?.commitmentProfile);
+    const isCallerComplete = isCallerProfileComplete && isCallerCommitmentComplete;
+
     const blocks = await prisma.block.findMany({
       where: {
         OR: [{ blockerId: requestingUserId }, { blockedId: requestingUserId }],
@@ -336,19 +441,191 @@ export class RequirementService {
       if (b.blockedId === requestingUserId) blockedUserIds.add(b.blockerId);
     }
     const excludedOwnerIds = Array.from(blockedUserIds);
-    excludedOwnerIds.push(requestingUserId); // Exclude caller's own requirements
+    excludedOwnerIds.push(requestingUserId);
 
-    // 3. Decode cursor if provided
-    let cursorObj: { createdAt: Date; id: string } | null = null;
-    if (params.cursor) {
-      cursorObj = decodeCursor(params.cursor);
-    }
-
-    // Prepare filter clauses
     const rawSearch = params.q ? params.q.trim() : '';
     const sanitizedQuery = sanitizeSearchQuery(rawSearch);
+    const sortMode = params.sort === 'match' ? 'match' : 'recent';
 
-    // Standard Prisma criteria
+    const attachScore = (dto: RequirementDTO, reqRecord: any) => {
+      if (!isCallerComplete) {
+        dto.score = null;
+        dto.breakdown = null;
+        dto.reasons = ['Complete your profile to see your score'];
+        return;
+      }
+
+      const scoreResult = score(
+        {
+          profile: requesterUser?.profile,
+          commitment: requesterUser?.commitmentProfile,
+        },
+        {
+          needSkill: reqRecord.needSkill,
+          industry: reqRecord.industry,
+          stage: reqRecord.stage,
+          equityOfferMax: reqRecord.equityOfferMax,
+          commitment: reqRecord.commitment,
+          location: reqRecord.location,
+          remote: reqRecord.remote,
+        },
+        {
+          profile: reqRecord.owner?.profile,
+          commitment: reqRecord.owner?.commitmentProfile,
+        },
+      );
+
+      dto.score = scoreResult.score;
+      dto.breakdown = scoreResult.breakdown;
+      dto.reasons = scoreResult.reasons;
+    };
+
+    if (sortMode === 'match') {
+      let matchCursor: MatchCursorPayload | null = null;
+      if (params.cursor) {
+        matchCursor = decodeCursor(params.cursor, 'match') as MatchCursorPayload;
+      }
+
+      if (!isCallerComplete) {
+        return RequirementService.browseRequirements(requestingUserId, {
+          ...params,
+          sort: 'recent',
+        });
+      }
+
+      const whereConditions: Prisma.RequirementWhereInput = {
+        status: RequirementStatus.ACTIVE,
+        ownerId: { notIn: excludedOwnerIds },
+        ...(canSeeVerifiedOnly ? {} : { visibility: Visibility.PUBLIC }),
+        ...(params.skill ? { needSkill: params.skill } : {}),
+        ...(params.stage ? { stage: params.stage } : {}),
+        ...(params.commitment ? { commitment: params.commitment } : {}),
+        ...(params.remote !== undefined ? { remote: params.remote } : {}),
+        ...(params.location
+          ? {
+              location: {
+                contains: params.location.replace(/[%_]/g, '\\$&'),
+              },
+            }
+          : {}),
+      };
+
+      if (sanitizedQuery.length > 0 && sanitizedQuery.length < 3) {
+        const escapedTerm = sanitizedQuery.replace(/[%_]/g, '\\$&');
+        whereConditions.OR = [
+          { title: { contains: escapedTerm } },
+          { industry: { contains: escapedTerm } },
+          { needSkill: { contains: escapedTerm } },
+        ];
+      }
+
+      let candidateRecords: any[] = [];
+
+      if (sanitizedQuery.length >= 3) {
+        const skillClause = params.skill ? Prisma.sql`AND r.needSkill = ${params.skill}` : Prisma.empty;
+        const stageClause = params.stage ? Prisma.sql`AND r.stage = ${params.stage}` : Prisma.empty;
+        const commitmentClause = params.commitment ? Prisma.sql`AND r.commitment = ${params.commitment}` : Prisma.empty;
+        const remoteClause = params.remote !== undefined ? Prisma.sql`AND r.remote = ${params.remote}` : Prisma.empty;
+        const locationClause = params.location ? Prisma.sql`AND r.location LIKE ${`%${params.location.replace(/[%_]/g, '\\$&')}%`}` : Prisma.empty;
+        const visibilityClause = canSeeVerifiedOnly ? Prisma.empty : Prisma.sql`AND r.visibility = 'PUBLIC'`;
+        const excludedClause = excludedOwnerIds.length > 0
+          ? Prisma.sql`AND r.ownerId NOT IN (${Prisma.join(excludedOwnerIds)})`
+          : Prisma.empty;
+
+        const rawResults = await prisma.$queryRaw<any[]>`
+          SELECT r.id
+          FROM requirements r
+          WHERE r.status = 'ACTIVE'
+          ${excludedClause}
+          ${visibilityClause}
+          ${skillClause}
+          ${stageClause}
+          ${commitmentClause}
+          ${remoteClause}
+          ${locationClause}
+          AND MATCH(r.title, r.industry, r.needSkill) AGAINST (${sanitizedQuery} IN BOOLEAN MODE)
+          ORDER BY r.createdAt DESC, r.id DESC
+          LIMIT ${MATCH_CONFIG.candidateCap};
+        `;
+
+        const reqIds = rawResults.map((row) => row.id);
+        if (reqIds.length > 0) {
+          candidateRecords = await prisma.requirement.findMany({
+            where: { id: { in: reqIds } },
+            include: {
+              owner: {
+                include: {
+                  profile: true,
+                  commitmentProfile: true,
+                  verificationRecords: true,
+                },
+              },
+            },
+            orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          });
+        }
+      } else {
+        candidateRecords = await prisma.requirement.findMany({
+          where: whereConditions,
+          take: MATCH_CONFIG.candidateCap,
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          include: {
+            owner: {
+              include: {
+                profile: true,
+                commitmentProfile: true,
+                verificationRecords: true,
+              },
+            },
+          },
+        });
+      }
+
+      const scoredDTOs: RequirementDTO[] = candidateRecords.map((rec) => {
+        const dto = mapToRequirementDTO(rec, requestingUserId);
+        attachScore(dto, rec);
+        return dto;
+      });
+
+      scoredDTOs.sort((a, b) => {
+        const scoreA = a.score ?? -1;
+        const scoreB = b.score ?? -1;
+        if (scoreA !== scoreB) {
+          return scoreB - scoreA;
+        }
+        return a.id.localeCompare(b.id);
+      });
+
+      let startIndex = 0;
+      if (matchCursor) {
+        const targetScore = matchCursor.score ?? -1;
+        const targetId = matchCursor.id;
+        const idx = scoredDTOs.findIndex((item) => {
+          const itemScore = item.score ?? -1;
+          if (itemScore < targetScore) return true;
+          if (itemScore === targetScore && item.id.localeCompare(targetId) > 0) return true;
+          return false;
+        });
+        startIndex = idx === -1 ? scoredDTOs.length : idx;
+      }
+
+      const pageItems = scoredDTOs.slice(startIndex, startIndex + limit);
+      let nextCursor: string | null = null;
+      if (startIndex + limit < scoredDTOs.length) {
+        const lastItem = pageItems[pageItems.length - 1];
+        nextCursor = encodeMatchCursor(lastItem.score ?? null, lastItem.id);
+      }
+
+      return { items: pageItems, nextCursor };
+    }
+
+    let recentCursor: RecentCursorPayload | null = null;
+    if (params.cursor) {
+      recentCursor = decodeCursor(params.cursor, 'recent') as RecentCursorPayload;
+    }
+
+    const cursorObj = recentCursor ? { createdAt: new Date(recentCursor.createdAt), id: recentCursor.id } : null;
+
     const whereConditions: Prisma.RequirementWhereInput = {
       status: RequirementStatus.ACTIVE,
       ownerId: { notIn: excludedOwnerIds },
@@ -366,7 +643,6 @@ export class RequirementService {
         : {}),
     };
 
-    // If search term length < 3, use LIKE filter in Prisma
     if (sanitizedQuery.length > 0 && sanitizedQuery.length < 3) {
       const escapedTerm = sanitizedQuery.replace(/[%_]/g, '\\$&');
       whereConditions.OR = [
@@ -376,7 +652,6 @@ export class RequirementService {
       ];
     }
 
-    // Cursor pagination condition
     if (cursorObj) {
       whereConditions.AND = [
         {
@@ -393,9 +668,7 @@ export class RequirementService {
 
     let records: any[] = [];
 
-    // Search >= 3 characters: Use MySQL FULLTEXT search via prisma.$queryRaw
     if (sanitizedQuery.length >= 3) {
-      // Build raw query for FULLTEXT with parameterized inputs
       const cursorClause = cursorObj
         ? Prisma.sql`AND (r.createdAt < ${cursorObj.createdAt} OR (r.createdAt = ${cursorObj.createdAt} AND r.id < ${cursorObj.id}))`
         : Prisma.empty;
@@ -410,7 +683,6 @@ export class RequirementService {
         ? Prisma.sql`AND r.ownerId NOT IN (${Prisma.join(excludedOwnerIds)})`
         : Prisma.empty;
 
-      // FULLTEXT search using boolean mode
       const rawResults = await prisma.$queryRaw<any[]>`
         SELECT r.id
         FROM requirements r
@@ -429,7 +701,6 @@ export class RequirementService {
       `;
 
       const reqIds = rawResults.map((row) => row.id);
-
       if (reqIds.length > 0) {
         records = await prisma.requirement.findMany({
           where: { id: { in: reqIds } },
@@ -437,6 +708,7 @@ export class RequirementService {
             owner: {
               include: {
                 profile: true,
+                commitmentProfile: true,
                 verificationRecords: true,
               },
             },
@@ -445,7 +717,6 @@ export class RequirementService {
         });
       }
     } else {
-      // Standard Prisma findMany (for no-search OR short-term LIKE search)
       records = await prisma.requirement.findMany({
         where: whereConditions,
         take: limit + 1,
@@ -454,6 +725,7 @@ export class RequirementService {
           owner: {
             include: {
               profile: true,
+              commitmentProfile: true,
               verificationRecords: true,
             },
           },
@@ -464,11 +736,15 @@ export class RequirementService {
     let nextCursor: string | null = null;
     if (records.length > limit) {
       const nextItem = records[limit - 1];
-      nextCursor = encodeCursor(nextItem.createdAt, nextItem.id);
+      nextCursor = encodeRecentCursor(nextItem.createdAt, nextItem.id);
       records = records.slice(0, limit);
     }
 
-    const items = records.map(mapToRequirementDTO);
+    const items = records.map((rec) => {
+      const dto = mapToRequirementDTO(rec, requestingUserId);
+      attachScore(dto, rec);
+      return dto;
+    });
 
     return { items, nextCursor };
   }

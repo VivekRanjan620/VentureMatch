@@ -22,7 +22,7 @@ All error responses strictly adhere to the following JSON shape:
 ```
 
 ### Common Error Codes
-- `INVALID_INPUT`: Request body or parameters failed Zod validation or invalid cursor format.
+- `INVALID_INPUT`: Request body or parameters failed Zod validation or invalid cursor format/mode.
 - `UNAUTHORIZED`: Missing, invalid, or expired JWT access token.
 - `FORBIDDEN`: User does not have permission (e.g. incomplete profile, modifying another user's requirement, reopening closed requirement, or unverified access to VERIFIED_ONLY requirement).
 - `NOT_FOUND`: The requested resource was not found (or requirement is PAUSED/CLOSED for non-owners, or blocked).
@@ -65,6 +65,44 @@ Calculated dynamically on `GET /me`:
 
 ---
 
+## Recommendation Scoring Specification
+
+Every requirement returned via `GET /requirements` and `GET /requirements/:id` includes a personalized recommendation score and breakdown for the authenticated user.
+
+> [!NOTE]
+> Terminology: The UI displays this as **"recommendation score"**, never "compatibility".
+
+### Component Weights (`config/matching.ts`) Total = 100
+- `skillComplement` (**25 pts**): `1.0` if candidate has `needSkill` and owner lacks it; `0.6` if both have it; `0.0` if candidate lacks it.
+- `requirementFit` (**20 pts**): `1.0` for exact availability match (`FULL`/`PART`/`WEEKEND`); `0.4` if requirement is `FULL` and candidate is `PART`; `0.0` otherwise.
+- `commitment` (**15 pts**): Evaluates `hoursPerWeek` ($\ge 35$: 1.0, $\ge 20$: 0.7, $\ge 10$: 0.4, $< 10$: 0.2) and `minMonths` ($\ge 12$: 1.0, $\ge 6$: 0.7, $\ge 3$: 0.4, $< 3$: 0.2).
+- `industryExperience` (**10 pts**): Same industry base (0.8) or different industry (0.3) + `previousStartup` bonus (+0.2, capped at 1.0).
+- `stage` (**10 pts**): Candidate `experienceYears` / `previousStartup` vs requirement `stage` (`IDEA`: 1.0; `MVP`: $\ge 1$ yr/startup 1.0; `EARLY_TRACTION`: $\ge 3$ yrs 1.0; `GROWTH`: $\ge 5$ yrs 1.0).
+- `equityCompensation` (**10 pts**): Candidate expectation vs requirement `equityOfferMax` (maximum equity the founder is willing to offer - public):
+  - `candEquity <= reqEquityOfferMax` $\rightarrow$ `High` / `1.0` (full points).
+  - Exceeds max offered by $1..10$ points $\rightarrow$ `"Needs discussion"` / `0.5` (partial points).
+  - Exceeds max offered by $> 10$ points $\rightarrow$ `Low` / `0.0` (0 points).
+  - Missing `equityOfferMax` $\rightarrow$ `"Needs discussion"` / `0.5` (neutral points).
+- `location` (**5 pts**): `1.0` (`High`) if `requirement.remote === true` OR normalized cities match (taking substring before first comma, e.g. `"Austin, TX"` vs `"Austin"`); `0.0` (`Low`) otherwise. Candidate's `remote` capability flag does NOT make an onsite requirement match.
+- `preferences` (**5 pts**): Neutral placeholder constant (`0.5` / `Medium` label) until real preference data exists.
+
+### Breakdown Item Shape
+Each component returns:
+```json
+{
+  "weight": 25,
+  "points": 25,
+  "label": "High" // "High" | "Medium" | "Low" | "Needs discussion"
+}
+```
+*Rounding*: `score` = sum of component points, clamped to $0..100$.
+
+### Null Score Cases
+- **Incomplete Candidate Profile or Commitment**: Returns `score: null`, `breakdown: null`, `reasons: ["Complete your profile to see your score"]`.
+- **Requirement Owner**: Returns `score: null`, `breakdown: null`, `reasons: []`.
+
+---
+
 ## Verification Status Specification
 
 Verification records indicate account linking or self-declared contact methods. They are **never** labeled as `"verified"`:
@@ -94,6 +132,7 @@ Verification records indicate account linking or self-declared contact methods. 
   "currentUsers": 150,
   "ownerContributes": "Product Strategy, 100k angel funding raised",
   "offer": "40-50% Equity",
+  "equityOfferMax": 50, // maximum equity the founder is willing to offer (public, 0-100)
   "commitment": "FULL", // "FULL" | "PART" | "WEEKEND"
   "location": "San Francisco, CA",
   "remote": true, // Default: true
@@ -102,35 +141,7 @@ Verification records indicate account linking or self-declared contact methods. 
 ```
 
 #### Success Response (`201 Created`)
-Returns requirement DTO. Note: `startupName` is returned ONLY if `startupNamePublic === true`. Owner contact info is NEVER included.
-
-```json
-{
-  "requirement": {
-    "id": "uuid-v4-string",
-    "title": "CTO & Technical Co-Founder for AI Engine",
-    "needSkill": "TECH",
-    "industry": "Artificial Intelligence",
-    "stage": "MVP",
-    "currentUsers": 150,
-    "ownerContributes": "Product Strategy, 100k angel funding raised",
-    "offer": "40-50% Equity",
-    "commitment": "FULL",
-    "location": "San Francisco, CA",
-    "remote": true,
-    "createdAt": "2026-10-05T12:00:00.000Z",
-    "status": "ACTIVE",
-    "visibility": "PUBLIC",
-    "startupName": "AgenticFlow",
-    "owner": {
-      "id": "uuid-v4-string",
-      "name": "Alex Rivera",
-      "city": "San Francisco, CA",
-      "badges": ["EMAIL_DECLARED"]
-    }
-  }
-}
-```
+Returns requirement DTO with `score: null`.
 
 ---
 
@@ -138,17 +149,21 @@ Returns requirement DTO. Note: `startupName` is returned ONLY if `startupNamePub
 - **GET** `/requirements`
 - **Auth Required**: Yes (`Bearer <accessToken>`)
 
+#### Field Visibility Rules
+- `startupName` (`string`, optional): Returned **ONLY IF** `startupNamePublic === true` OR caller is the requirement owner.
+- `equityOfferMax` (`number | null`): Maximum equity offered (0-100). Public field.
+
 #### Query Parameters
 - `q` (`string`, optional): Search query.
-  - Terms ≥ 3 chars: Uses MySQL FULLTEXT search (`MATCH(title, industry, needSkill) AGAINST(:term IN BOOLEAN MODE)`). Strips boolean operators (`+ - < > ( ) ~ * " @`).
-  - Terms < 3 chars (e.g. `"AI"`): Uses `LIKE` search on `title`, `industry`, or `needSkill` with wildcard escaping.
+  - Terms $\ge 3$ chars: Uses MySQL FULLTEXT search (`MATCH(title, industry, needSkill) AGAINST(:term IN BOOLEAN MODE)`). Strips boolean operators (`+ - < > ( ) ~ * " @`).
+  - Terms $< 3$ chars (e.g. `"AI"`): Uses `LIKE` search on `title`, `industry`, or `needSkill` with wildcard escaping.
 - `skill` (`string`, optional): Filter by canonical skill (e.g. `TECH`).
 - `stage` (`string`, optional): Filter by stage (`IDEA`, `MVP`, `EARLY_TRACTION`, `GROWTH`).
 - `commitment` (`string`, optional): Filter by commitment (`FULL`, `PART`, `WEEKEND`).
 - `location` (`string`, optional): Filter by location substring.
 - `remote` (`boolean`, optional): `true` or `false`.
-- `sort` (`string`, optional): `recent` (default). `match` is accepted but reserved for Step 4.
-- `cursor` (`string`, optional): Base64-encoded opaque cursor string `{ createdAt, id }`. Returns `400 INVALID_INPUT` if invalid.
+- `sort` (`string`, optional): `recent` (default) or `match`.
+- `cursor` (`string`, optional): Opaque base64 cursor string.
 - `limit` (`number`, optional): Items per page (default: 20, max: 50).
 
 #### Browse Filtering Rules
@@ -170,6 +185,7 @@ Returns requirement DTO. Note: `startupName` is returned ONLY if `startupNamePub
       "currentUsers": 150,
       "ownerContributes": "Product Strategy, 100k angel funding raised",
       "offer": "40-50% Equity",
+      "equityOfferMax": 50,
       "commitment": "FULL",
       "location": "San Francisco, CA",
       "remote": true,
@@ -181,10 +197,31 @@ Returns requirement DTO. Note: `startupName` is returned ONLY if `startupNamePub
         "name": "Alex Rivera",
         "city": "San Francisco, CA",
         "badges": ["EMAIL_DECLARED", "LINKEDIN_LINKED"]
-      }
+      },
+      "score": 98,
+      "breakdown": {
+        "skillComplement": { "weight": 25, "points": 25, "label": "High" },
+        "requirementFit": { "weight": 20, "points": 20, "label": "High" },
+        "commitment": { "weight": 15, "points": 15, "label": "High" },
+        "industryExperience": { "weight": 10, "points": 10, "label": "High" },
+        "stage": { "weight": 10, "points": 10, "label": "High" },
+        "equityCompensation": { "weight": 10, "points": 10, "label": "High" },
+        "location": { "weight": 5, "points": 5, "label": "High" },
+        "preferences": { "weight": 5, "points": 3, "label": "Medium" }
+      },
+      "reasons": [
+        "You have the TECH skill this founder needs.",
+        "Your FULL availability matches what the founder is looking for.",
+        "Your commitment of 40 hrs/wk for 12+ months provides good stability.",
+        "Relevant industry background in Artificial Intelligence.",
+        "Your experience level (5 yrs) aligns with the MVP stage.",
+        "You expect 20% and the founder offers up to 50%.",
+        "Remote role, location is not a constraint.",
+        "Default preference score (placeholder until preference data exists)."
+      ]
     }
   ],
-  "nextCursor": "eyJjcmVhdGVkQXQiOiIyMDI2LTEwLTA1VDEyOjAwOjAwLjAwMFoiLCJpZCI6InV1aWQtdjQtc3RyaW5nIn0=" // null on last page
+  "nextCursor": "eyJtb2RlIjoibWF0Y2giLCJzY29yZSI6OTgsImlkIjoidXVpZC12NC1zdHJpbmcifQ=="
 }
 ```
 
@@ -195,36 +232,7 @@ Returns requirement DTO. Note: `startupName` is returned ONLY if `startupNamePub
 - **Auth Required**: Yes (`Bearer <accessToken>`)
 
 #### Success Response (`200 OK`)
-Returns list of all requirements owned by the authenticated user sorted by `createdAt desc` (includes `ACTIVE`, `PAUSED`, and `CLOSED` items).
-
-```json
-{
-  "requirements": [
-    {
-      "id": "uuid-v4-string",
-      "title": "CTO & Technical Co-Founder for AI Engine",
-      "needSkill": "TECH",
-      "industry": "Artificial Intelligence",
-      "stage": "MVP",
-      "currentUsers": 150,
-      "offer": "40-50% Equity",
-      "commitment": "FULL",
-      "location": "San Francisco, CA",
-      "remote": true,
-      "createdAt": "2026-10-05T12:00:00.000Z",
-      "status": "ACTIVE",
-      "visibility": "PUBLIC",
-      "startupName": "AgenticFlow",
-      "owner": {
-        "id": "uuid-v4-string",
-        "name": "Alex Rivera",
-        "city": "San Francisco, CA",
-        "badges": ["EMAIL_DECLARED"]
-      }
-    }
-  ]
-}
-```
+Returns list of all requirements owned by caller. Includes `startupName` regardless of `startupNamePublic`. `score` is always `null` for owned items.
 
 ---
 
@@ -233,64 +241,14 @@ Returns list of all requirements owned by the authenticated user sorted by `crea
 - **Auth Required**: Yes (`Bearer <accessToken>`)
 
 #### Rules
-- Returns `404 NOT_FOUND` if requirement does not exist, if blocked in either direction, OR if `status !== "ACTIVE"` and caller is not the owner.
-- Returns `403 FORBIDDEN` if requirement is `VERIFIED_ONLY` and caller is not the owner and has no `LINKEDIN` or `PHONE` verification record.
-
-#### Success Response (`200 OK`)
-```json
-{
-  "requirement": {
-    "id": "uuid-v4-string",
-    "title": "CTO & Technical Co-Founder for AI Engine",
-    "needSkill": "TECH",
-    "industry": "Artificial Intelligence",
-    "stage": "MVP",
-    "currentUsers": 150,
-    "offer": "40-50% Equity",
-    "commitment": "FULL",
-    "location": "San Francisco, CA",
-    "remote": true,
-    "createdAt": "2026-10-05T12:00:00.000Z",
-    "status": "ACTIVE",
-    "visibility": "PUBLIC",
-    "owner": {
-      "id": "uuid-v4-string",
-      "name": "Alex Rivera",
-      "city": "San Francisco, CA",
-      "badges": ["EMAIL_DECLARED"]
-    }
-  }
-}
-```
+- Returns `404 NOT_FOUND` if requirement does not exist, if blocked in either direction, OR if `status !== "ACTIVE"` and caller is not owner.
+- Returns `403 FORBIDDEN` if requirement is `VERIFIED_ONLY` and caller is not owner and has no `LINKEDIN`/`PHONE` verification record.
+- `startupName` is returned ONLY IF `startupNamePublic === true` OR caller is the requirement owner.
 
 ---
 
 ### 5. Update Requirement (`PATCH /requirements/:id`)
 - **PATCH** `/requirements/:id`
 - **Auth Required**: Yes (`Bearer <accessToken>`)
-- **Owner Only**: Returns `403 FORBIDDEN` if caller is not the owner.
-- **Strict Zod Payload**: `.strict()` (whitelist: cannot pass `id`, `ownerId`, `createdAt`).
-
-#### Status Transition Rules
-- `ACTIVE` ↔ `PAUSED` allowed.
-- `ACTIVE` / `PAUSED` ➔ `CLOSED` allowed.
-- `CLOSED` requirements **cannot** be reopened (attempting to change status of a `CLOSED` requirement returns `400 INVALID_INPUT`).
-
-#### Request Body
-```json
-{
-  "title": "Updated Requirement Title",
-  "status": "PAUSED" // "ACTIVE" | "PAUSED" | "CLOSED"
-}
-```
-
-#### Success Response (`200 OK`)
-```json
-{
-  "requirement": {
-    "id": "uuid-v4-string",
-    "title": "Updated Requirement Title",
-    "status": "PAUSED"
-  }
-}
-```
+- **Owner Only**: Returns `403 FORBIDDEN` if caller is not owner.
+- **Strict Zod Payload**: `.strict()`

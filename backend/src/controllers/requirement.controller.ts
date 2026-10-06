@@ -17,6 +17,7 @@ const createRequirementSchema = z
     currentUsers: z.number().int().min(0).default(0),
     ownerContributes: z.string().optional(),
     offer: z.string().optional(),
+    equityOfferMax: z.number().int().min(0).max(100).optional(),
     commitment: z.nativeEnum(Availability, {
       errorMap: () => ({ message: 'Commitment must be FULL, PART, or WEEKEND' }),
     }),
@@ -37,6 +38,7 @@ const updateRequirementSchema = z
     currentUsers: z.number().int().min(0).optional(),
     ownerContributes: z.string().optional(),
     offer: z.string().optional(),
+    equityOfferMax: z.number().int().min(0).max(100).optional(),
     commitment: z.nativeEnum(Availability).optional(),
     location: z.string().optional(),
     remote: z.boolean().optional(),
