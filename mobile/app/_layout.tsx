@@ -8,6 +8,7 @@ import {
   DMSans_500Medium,
   DMSans_700Bold,
 } from '@expo-google-fonts/dm-sans';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useAuthStore } from '../src/store/auth';
 import { useMe } from '../src/features/profile/hooks';
 import { OfflineScreen } from '../src/components/OfflineScreen';
@@ -79,13 +80,18 @@ function InitialLayout() {
 
 export default function RootLayout() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <InitialLayout />
-    </QueryClientProvider>
+    <GestureHandlerRootView style={styles.rootView}>
+      <QueryClientProvider client={queryClient}>
+        <InitialLayout />
+      </QueryClientProvider>
+    </GestureHandlerRootView>
   );
 }
 
 const styles = StyleSheet.create({
+  rootView: {
+    flex: 1,
+  },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',

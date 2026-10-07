@@ -1,6 +1,11 @@
 import { getTokens, saveTokens } from '../lib/secureStorage';
 import { ApiError } from '../lib/errors';
-import { useAuthStore } from '../store/auth';
+
+function getAuthStore() {
+  // Lazy require to avoid top-level require cycle between auth.ts and client.ts
+  const { useAuthStore } = require('../store/auth');
+  return useAuthStore.getState();
+}
 
 const BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://192.168.29.237:4000/api/v1';
 
@@ -47,14 +52,14 @@ const refreshTokens = async (): Promise<string> => {
     await saveTokens(newAccessToken, newRefreshToken);
 
     // 2. Update Zustand store state BEFORE resolving/retrying
-    useAuthStore.getState().setTokens(newAccessToken, newRefreshToken);
+    getAuthStore().setTokens(newAccessToken, newRefreshToken);
 
     return newAccessToken;
   } catch (err: any) {
     clearTimeout(timer);
     // Refresh failed with token rejection -> trigger auth failure
     if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
-      await useAuthStore.getState().handleAuthFailure();
+      await getAuthStore().handleAuthFailure();
     }
     throw err;
   } finally {
@@ -77,7 +82,7 @@ export async function apiRequest<T = any>(
   };
 
   if (!skipAuth) {
-    const { accessToken } = useAuthStore.getState();
+    const { accessToken } = getAuthStore();
     if (accessToken) {
       headers['Authorization'] = `Bearer ${accessToken}`;
     }

@@ -13,11 +13,12 @@ import { colors, radius, layout, spacing } from '../theme/tokens';
 export interface TextFieldProps extends TextInputProps {
   label?: string;
   error?: string;
+  helperText?: string;
   containerStyle?: StyleProp<ViewStyle>;
 }
 
 export const TextField = React.forwardRef<TextInput, TextFieldProps>(
-  ({ label, error, containerStyle, style, onFocus, onBlur, ...rest }, ref) => {
+  ({ label, error, helperText, containerStyle, style, onFocus, onBlur, ...rest }, ref) => {
     const [isFocused, setIsFocused] = useState(false);
 
     return (
@@ -42,7 +43,11 @@ export const TextField = React.forwardRef<TextInput, TextFieldProps>(
           }}
           {...rest}
         />
-        {error ? <Text style={styles.errorText}>{error}</Text> : null}
+        {error ? (
+          <Text style={styles.errorText}>{error}</Text>
+        ) : helperText ? (
+          <Text style={styles.helperText}>{helperText}</Text>
+        ) : null}
       </View>
     );
   }
@@ -84,6 +89,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: 'DMSans_400Regular',
     color: colors.error,
+    marginTop: spacing.xs,
+  },
+  helperText: {
+    fontSize: 12,
+    fontFamily: 'DMSans_400Regular',
+    color: colors.mutedText,
     marginTop: spacing.xs,
   },
 });
