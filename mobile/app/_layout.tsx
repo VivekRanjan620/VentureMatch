@@ -9,6 +9,7 @@ import {
   DMSans_700Bold,
 } from '@expo-google-fonts/dm-sans';
 import { useAuthStore } from '../src/store/auth';
+import { useMe } from '../src/features/profile/hooks';
 import { OfflineScreen } from '../src/components/OfflineScreen';
 import { colors } from '../src/theme/tokens';
 
@@ -16,6 +17,7 @@ const queryClient = new QueryClient();
 
 function InitialLayout() {
   const { status, hydrate, retryHydration } = useAuthStore();
+  const { data: meData, isLoading: meLoading } = useMe();
   const segments = useSegments();
   const router = useRouter();
 
@@ -35,17 +37,32 @@ function InitialLayout() {
     }
 
     const inAuthGroup = segments[0] === '(auth)';
+    const inOnboardingGroup = segments[0] === '(onboarding)';
 
     if (status === 'signedOut' && !inAuthGroup) {
-      // Redirect to login screen and prevent back navigation
       router.replace('/(auth)/login');
-    } else if (status === 'signedIn' && inAuthGroup) {
-      // Redirect to main tabs and prevent back navigation
-      router.replace('/(tabs)/discover');
+      return;
     }
-  }, [status, segments, fontsLoaded]);
 
-  if (!fontsLoaded || status === 'loading') {
+    if (status === 'signedIn') {
+      if (meLoading) return;
+
+      const user = meData?.user;
+      if (user) {
+        const isComplete = Boolean(user.profileComplete) && Boolean(user.commitmentComplete);
+
+        if (!isComplete && !inOnboardingGroup) {
+          // Gate user into onboarding flow until profile & commitment are complete
+          router.replace('/(onboarding)');
+        } else if (isComplete && (inAuthGroup || inOnboardingGroup)) {
+          // Both complete -> allow into tabs
+          router.replace('/(tabs)/discover');
+        }
+      }
+    }
+  }, [status, meData, meLoading, segments, fontsLoaded]);
+
+  if (!fontsLoaded || status === 'loading' || (status === 'signedIn' && meLoading)) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color={colors.primary} />
