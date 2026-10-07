@@ -9,6 +9,7 @@ import {
   DMSans_700Bold,
 } from '@expo-google-fonts/dm-sans';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useAuthStore } from '../src/store/auth';
 import { useMe } from '../src/features/profile/hooks';
 import { OfflineScreen } from '../src/components/OfflineScreen';
@@ -81,9 +82,11 @@ function InitialLayout() {
 export default function RootLayout() {
   return (
     <GestureHandlerRootView style={styles.rootView}>
-      <QueryClientProvider client={queryClient}>
-        <InitialLayout />
-      </QueryClientProvider>
+      <SafeAreaProvider>
+        <QueryClientProvider client={queryClient}>
+          <InitialLayout />
+        </QueryClientProvider>
+      </SafeAreaProvider>
     </GestureHandlerRootView>
   );
 }

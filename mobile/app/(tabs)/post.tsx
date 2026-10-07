@@ -41,6 +41,7 @@ import {
   STAGE_OPTIONS,
   AVAILABILITY_OPTIONS,
   VISIBILITY_OPTIONS,
+  INDUSTRY_SUGGESTIONS,
 } from '../../src/constants/options';
 import { formatApiError } from '../../src/lib/errors';
 
@@ -395,26 +396,48 @@ export default function PostScreen() {
                     value={value}
                     onValueChange={onChange}
                     trackColor={{ false: colors.border, true: colors.primary }}
+                    thumbColor={colors.surface}
                   />
                 )}
               />
             </View>
 
-            {/* Industry */}
-            <Controller
-              control={control}
-              name="industry"
-              render={({ field: { onChange, onBlur, value } }) => (
-                <TextField
-                  label="Industry *"
-                  placeholder="e.g. Fintech, Healthcare, AI"
-                  onBlur={onBlur}
-                  onChangeText={onChange}
-                  value={value}
-                  error={errors.industry?.message}
-                />
-              )}
-            />
+            {/* Industry with Suggestions */}
+            <View style={styles.formSection}>
+              <Controller
+                control={control}
+                name="industry"
+                render={({ field: { onChange, onBlur, value } }) => (
+                  <View style={styles.fieldGroup}>
+                    <TextField
+                      label="Industry *"
+                      placeholder="e.g. Fintech, Healthcare, AI"
+                      onBlur={onBlur}
+                      onChangeText={onChange}
+                      value={value}
+                      error={errors.industry?.message}
+                    />
+                    <Text style={styles.subLabel}>Suggestions:</Text>
+                    <View style={styles.optionsGrid}>
+                      {INDUSTRY_SUGGESTIONS.map((ind) => {
+                        const isSelected = value === ind;
+                        return (
+                          <TouchableOpacity
+                            key={ind}
+                            style={[styles.pill, isSelected && styles.pillSelected]}
+                            onPress={() => onChange(ind)}
+                          >
+                            <Text style={[styles.pillText, isSelected && styles.pillTextSelected]}>
+                              {ind}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </View>
+                )}
+              />
+            </View>
 
             {/* Stage */}
             <View style={styles.formSection}>
@@ -513,7 +536,7 @@ export default function PostScreen() {
                   onBlur={onBlur}
                   onChangeText={onChange}
                   value={value}
-                  helperText="Founder offers up to X% equity"
+                  helperText="Candidates will see this number: the maximum equity you are willing to offer."
                   error={errors.equityOfferMax?.message}
                 />
               )}
@@ -576,37 +599,13 @@ export default function PostScreen() {
                     value={value}
                     onValueChange={onChange}
                     trackColor={{ false: colors.border, true: colors.primary }}
+                    thumbColor={colors.surface}
                   />
                 )}
               />
             </View>
 
-            {/* Visibility */}
-            <View style={styles.formSection}>
-              <Text style={styles.formLabel}>Visibility *</Text>
-              <Controller
-                control={control}
-                name="visibility"
-                render={({ field: { onChange, value } }) => (
-                  <View style={styles.optionsGrid}>
-                    {VISIBILITY_OPTIONS.map((opt) => {
-                      const isSelected = value === opt.value;
-                      return (
-                        <TouchableOpacity
-                          key={opt.value}
-                          style={[styles.pill, isSelected && styles.pillSelected]}
-                          onPress={() => onChange(opt.value)}
-                        >
-                          <Text style={[styles.pillText, isSelected && styles.pillTextSelected]}>
-                            {opt.label}
-                          </Text>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </View>
-                )}
-              />
-            </View>
+            {/* TODO: Restore "Verified Members Only" visibility option when a verification flow exists */}
 
             <Button
               title="Post Requirement"
@@ -880,6 +879,16 @@ const styles = StyleSheet.create({
   },
   errorBanner: {
     marginBottom: spacing.md,
+  },
+  fieldGroup: {
+    marginBottom: 0,
+  },
+  subLabel: {
+    fontSize: 12,
+    fontFamily: 'DMSans_500Medium',
+    color: colors.mutedText,
+    marginBottom: spacing.xs,
+    marginTop: -spacing.xs,
   },
   formSection: {
     marginBottom: spacing.md,

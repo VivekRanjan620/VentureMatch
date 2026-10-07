@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, Switch, TouchableOpacity } from 'react-native';
 import { TextField } from '../../../components/TextField';
 import { OnboardingFormState } from '../types';
-import { AGE_RANGE_OPTIONS } from '../../../constants/options';
+import { AGE_RANGE_OPTIONS, INDUSTRY_SUGGESTIONS } from '../../../constants/options';
 import { colors, spacing, radius } from '../../../theme/tokens';
 
 export interface StepAboutYouProps {
@@ -37,13 +37,33 @@ export const StepAboutYou: React.FC<StepAboutYouProps> = ({
         error={errors.city}
       />
 
-      <TextField
-        label="Industry *"
-        placeholder="e.g. Artificial Intelligence, Fintech"
-        value={formState.industry}
-        onChangeText={(val) => updateForm({ industry: val })}
-        error={errors.industry}
-      />
+      <View style={styles.fieldGroup}>
+        <TextField
+          label="Industry *"
+          placeholder="e.g. Artificial Intelligence, Fintech"
+          value={formState.industry}
+          onChangeText={(val) => updateForm({ industry: val })}
+          error={errors.industry}
+        />
+        <Text style={styles.subLabel}>Suggestions:</Text>
+        <View style={styles.chipRow}>
+          {INDUSTRY_SUGGESTIONS.map((ind) => {
+            const isSelected = formState.industry === ind;
+            return (
+              <TouchableOpacity
+                key={ind}
+                activeOpacity={0.8}
+                style={[styles.chip, isSelected && styles.chipSelected]}
+                onPress={() => updateForm({ industry: ind })}
+              >
+                <Text style={[styles.chipText, isSelected && styles.chipTextSelected]}>
+                  {ind}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      </View>
 
       <TextField
         label="Years of Experience *"
@@ -157,6 +177,16 @@ const styles = StyleSheet.create({
     fontFamily: 'DMSans_400Regular',
     color: colors.mutedText,
     marginTop: 2,
+  },
+  fieldGroup: {
+    marginBottom: spacing.md,
+  },
+  subLabel: {
+    fontSize: 12,
+    fontFamily: 'DMSans_500Medium',
+    color: colors.mutedText,
+    marginBottom: spacing.xs,
+    marginTop: -spacing.xs,
   },
   label: {
     fontSize: 14,

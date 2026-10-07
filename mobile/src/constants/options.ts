@@ -47,5 +47,16 @@ export const VERIFICATION_LABELS = {
   LINKEDIN_LINKED: 'Linked',
 } as const;
 
+export const INDUSTRY_SUGGESTIONS = [
+  'SaaS',
+  'Fintech',
+  'EdTech',
+  'HealthTech',
+  'E-commerce',
+  'AI',
+  'Food & Beverage',
+  'Other',
+] as const;
+
 export const RECOMMENDATION_SCORE_LABEL = 'rec. score' as const;
 export const RECOMMENDATION_SCORE_FULL_LABEL = 'recommendation score' as const;
