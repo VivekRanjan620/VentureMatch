@@ -11,12 +11,13 @@ import { ApiError } from '../../../lib/errors';
 export interface RequirementCardProps {
   item: RequirementSummaryItem;
   hasSentInterest: boolean;
+  sentInterestInfo?: { status: string; connectionId?: string | null } | null;
   onExpressInterest: (id: string) => Promise<void>;
   isExpressingInterest?: boolean;
 }
 
 export const RequirementCard: React.FC<RequirementCardProps> = React.memo(
-  ({ item, hasSentInterest, onExpressInterest, isExpressingInterest = false }) => {
+  ({ item, hasSentInterest, sentInterestInfo, onExpressInterest, isExpressingInterest = false }) => {
     const router = useRouter();
     const { user: currentUser } = useAuthStore();
 
@@ -39,8 +40,28 @@ export const RequirementCard: React.FC<RequirementCardProps> = React.memo(
       item.currentUsers !== null && item.currentUsers !== undefined ? `${item.currentUsers} users` : null,
     ].filter(Boolean);
 
+    const sentStatus = sentInterestInfo?.status;
+    const connectionId = sentInterestInfo?.connectionId;
+    const isConnected = sentStatus === 'ACCEPTED' || Boolean(connectionId);
+
+    const getInterestButtonLabel = () => {
+      if (isConnected) return 'Connected';
+      if (sentStatus === 'PENDING') return 'Interest sent';
+      if (sentStatus === 'LATER') return 'Maybe later';
+      if (sentStatus === 'DECLINED') return 'Declined';
+      if (sentStatus === 'WITHDRAWN') return 'Withdrawn';
+      if (hasSentInterest) return 'Interest sent';
+      return 'Interested';
+    };
+
+    const isButtonDisabled = hasSentInterest || Boolean(sentStatus) || isExpressingInterest;
+
     const handleInterestPress = async () => {
-      if (hasSentInterest || isOwner || isExpressingInterest) return;
+      if (isConnected && connectionId) {
+        router.push(`/connection/${connectionId}`);
+        return;
+      }
+      if (isButtonDisabled || isOwner) return;
       await onExpressInterest(item.id);
     };
 
@@ -127,11 +148,16 @@ export const RequirementCard: React.FC<RequirementCardProps> = React.memo(
         <View style={styles.actionRow}>
           {!isOwner && (
             <Button
-              title={hasSentInterest ? 'Interest sent' : 'Interested'}
-              disabled={hasSentInterest || isExpressingInterest}
+              title={getInterestButtonLabel()}
+              disabled={isButtonDisabled && !isConnected}
               loading={isExpressingInterest}
               onPress={handleInterestPress}
-              style={[styles.btn, styles.btnInterested, hasSentInterest && styles.btnSent]}
+              style={[
+                styles.btn,
+                styles.btnInterested,
+                isConnected && styles.btnConnected,
+                (isButtonDisabled && !isConnected) && styles.btnSent,
+              ]}
             />
           )}
 
@@ -294,6 +320,10 @@ const styles = StyleSheet.create({
   btnSent: {
     backgroundColor: colors.border,
     opacity: 0.7,
+  },
+  btnConnected: {
+    backgroundColor: colors.tint,
+    borderColor: '#99F6E4',
   },
   btnFullWidth: {
     flex: 1,

@@ -100,6 +100,7 @@ export interface SentInterestItem {
   score?: number | null;
   breakdown?: ScoreBreakdown | null;
   reasons?: string[];
+  connectionId?: string | null;
   createdAt: string;
   requirement: RequirementSummaryItem;
 }

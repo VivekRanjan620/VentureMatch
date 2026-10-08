@@ -109,15 +109,22 @@ export default function DiscoverScreen() {
       .filter((item): item is RequirementSummaryItem => Boolean(item && item.id));
   }, [data]);
 
-  // Set of requirement IDs user has already expressed interest in
-  const sentInterestRequirementIds = useMemo(() => {
-    if (!sentInterestsData?.interests) return new Set<string>();
-    return new Set(
-      sentInterestsData.interests
-        .filter((item) => Boolean(item && item.requirementId))
-        .map((item) => item.requirementId)
-    );
+  // Map of requirement ID -> sent interest info (status, connectionId)
+  const sentInterestMap = useMemo(() => {
+    const map = new Map<string, { status: string; connectionId?: string | null }>();
+    if (!sentInterestsData?.interests) return map;
+    for (const item of sentInterestsData.interests) {
+      const reqId = item?.requirementId || item?.requirement?.id;
+      if (reqId) {
+        map.set(reqId, { status: item.status, connectionId: item.connectionId });
+      }
+    }
+    return map;
   }, [sentInterestsData]);
+
+  const sentInterestRequirementIds = useMemo(() => {
+    return new Set(sentInterestMap.keys());
+  }, [sentInterestMap]);
 
   // Reset pagination & scroll to top when sort/filters change
   useEffect(() => {
@@ -177,16 +184,18 @@ export default function DiscoverScreen() {
     ({ item }: { item: RequirementSummaryItem }) => {
       if (!item || !item.id) return null;
       const hasSent = sentInterestRequirementIds.has(item.id);
+      const sentInfo = sentInterestMap.get(item.id);
       return (
         <RequirementCard
           item={item}
           hasSentInterest={hasSent}
+          sentInterestInfo={sentInfo}
           onExpressInterest={handleExpressInterest}
           isExpressingInterest={expressingId === item.id}
         />
       );
     },
-    [sentInterestRequirementIds, handleExpressInterest, expressingId]
+    [sentInterestRequirementIds, sentInterestMap, handleExpressInterest, expressingId]
   );
 
   const isProfileIncomplete =

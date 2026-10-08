@@ -22,7 +22,7 @@ const updateProfileSchema = z
     currentWork: z.string().optional(),
     shareablePhone: z
       .string()
-      .regex(/^\+?[0-9\s\-]{8,20}$/, 'Invalid phone number format (8-15 digits)')
+      .regex(/^\+?[0-9\s-]{8,20}$/, 'Invalid phone number format (8-15 digits)')
       .optional(),
     shareableEmail: z.string().email('Invalid shareable email format').optional(),
   })
@@ -142,6 +142,19 @@ export class UserController {
         parseResult.data.linkedinUrl,
       );
       res.status(200).json({ verification });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  static async getCounts(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      if (!req.user) {
+        throw AppError.unauthorized();
+      }
+
+      const counts = await UserService.getCounts(req.user.userId);
+      res.status(200).json(counts);
     } catch (error) {
       next(error);
     }

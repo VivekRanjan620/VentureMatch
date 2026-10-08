@@ -162,6 +162,8 @@ model Interest {
   connection    Connection?
 
   @@unique([requirementId, candidateId])
+  @@index([requirementId, status, createdAt])
+  @@index([candidateId, status, createdAt])
   @@map("interests")
 }
 

@@ -27,6 +27,8 @@ export interface UpdateCommitmentInput {
   remote?: boolean;
 }
 
+import { ConnectionService } from './connection.service';
+
 export const checkProfileComplete = (profile: any): boolean => {
   if (!profile) return false;
   const skillsArray = Array.isArray(profile.skills) ? profile.skills : [];
@@ -241,6 +243,28 @@ export class UserService {
       linkedinUrl,
       verifiedAt: null,
       linkedAt: record.createdAt,
+    };
+  }
+
+  static async getCounts(userId: string) {
+    const blockedUserIds = await ConnectionService.getBlockedUserIds(userId);
+
+    const pendingReceivedInterests = await prisma.interest.count({
+      where: {
+        requirement: {
+          ownerId: userId,
+          status: { in: ['ACTIVE', 'PAUSED'] },
+        },
+        status: 'PENDING',
+        candidateId: { notIn: Array.from(blockedUserIds) },
+      },
+    });
+
+    const connections = await ConnectionService.getConnectionsCount(userId, blockedUserIds);
+
+    return {
+      pendingReceivedInterests,
+      connections,
     };
   }
 }

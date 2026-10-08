@@ -4,6 +4,7 @@ import { saveTokens, getTokens, clearTokens } from '../lib/secureStorage';
 import { apiRequest } from '../api/client';
 import { ApiError } from '../lib/errors';
 import { useRequirementFilterStore } from '../features/requirements/store';
+import { queryClient } from '../lib/queryClient';
 
 export type AuthStatus = 'loading' | 'signedOut' | 'signedIn' | 'networkError';
 
@@ -25,6 +26,7 @@ export interface AuthState {
 const clearRequirementFilters = () => {
   useRequirementFilterStore.getState().resetFilters();
   useRequirementFilterStore.getState().setSearchQuery('');
+  queryClient.clear();
 };
 
 export const useAuthStore = create<AuthState>((set, get) => ({

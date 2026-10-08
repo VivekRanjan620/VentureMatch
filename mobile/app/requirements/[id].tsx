@@ -41,16 +41,37 @@ export default function RequirementDetailScreen() {
   const requirement = data?.requirement;
   const isOwner = Boolean(currentUser?.id && requirement?.owner?.id && currentUser.id === requirement.owner.id);
 
-  // Set of requirement IDs caller has sent interest to
-  const sentInterestIds = useMemo(() => {
-    if (!sentInterestsData?.interests) return new Set<string>();
-    return new Set(sentInterestsData.interests.map((item) => item.requirementId));
-  }, [sentInterestsData]);
+  // Find sent interest record for this requirement
+  const sentInterestItem = useMemo(() => {
+    if (!id || !sentInterestsData?.interests) return null;
+    return sentInterestsData.interests.find(
+      (item) => item.requirementId === id || item.requirement?.id === id
+    );
+  }, [id, sentInterestsData]);
 
-  const hasSentInterest = Boolean(id && sentInterestIds.has(id));
+  const sentStatus = sentInterestItem?.status;
+  const connectionId = sentInterestItem?.connectionId;
+  const isConnected = sentStatus === 'ACCEPTED' || Boolean(connectionId);
+  const hasSentInterest = Boolean(sentInterestItem);
+
+  const getInterestButtonLabel = () => {
+    if (isConnected) return 'Open connection';
+    if (sentStatus === 'PENDING') return 'Interest sent';
+    if (sentStatus === 'LATER') return 'Maybe later';
+    if (sentStatus === 'DECLINED') return 'Declined';
+    if (sentStatus === 'WITHDRAWN') return 'Withdrawn';
+    if (hasSentInterest) return 'Interest sent';
+    return 'Interested';
+  };
+
+  const isButtonDisabled = (hasSentInterest || Boolean(sentStatus) || expressInterestMutation.isPending) && !isConnected;
 
   const handleExpressInterest = useCallback(async () => {
-    if (!id || hasSentInterest || isOwner) return;
+    if (isConnected && connectionId) {
+      router.push(`/connection/${connectionId}`);
+      return;
+    }
+    if (!id || isButtonDisabled || isOwner) return;
     setServerError(null);
 
     try {
@@ -59,7 +80,7 @@ export default function RequirementDetailScreen() {
       if (err instanceof ApiError) {
         if (err.status === 409) {
           // Treat 409 conflict as already sent
-          sentInterestIds.add(id);
+          setServerError('Interest already sent for this requirement');
         } else if (err.status === 403) {
           Alert.alert(
             'Profile Incomplete',
@@ -80,7 +101,7 @@ export default function RequirementDetailScreen() {
         setServerError('Failed to send interest. Please try again.');
       }
     }
-  }, [id, hasSentInterest, isOwner, expressInterestMutation, sentInterestIds, router]);
+  }, [id, isConnected, connectionId, isButtonDisabled, isOwner, expressInterestMutation, router]);
 
   if (isLoading) {
     return (
@@ -277,11 +298,15 @@ export default function RequirementDetailScreen() {
       {!isOwner && (
         <View style={styles.stickyFooter}>
           <Button
-            title={hasSentInterest ? 'Interest sent' : 'Interested'}
-            disabled={hasSentInterest || expressInterestMutation.isPending}
+            title={getInterestButtonLabel()}
+            disabled={isButtonDisabled}
             loading={expressInterestMutation.isPending}
             onPress={handleExpressInterest}
-            style={[styles.interestedBtn, hasSentInterest && styles.btnSent]}
+            style={[
+              styles.interestedBtn,
+              isConnected && styles.btnConnected,
+              (isButtonDisabled && !isConnected) && styles.btnSent,
+            ]}
           />
         </View>
       )}
@@ -525,5 +550,9 @@ const styles = StyleSheet.create({
   btnSent: {
     backgroundColor: colors.border,
     opacity: 0.7,
+  },
+  btnConnected: {
+    backgroundColor: colors.tint,
+    borderColor: '#99F6E4',
   },
 });

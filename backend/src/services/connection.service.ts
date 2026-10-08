@@ -33,12 +33,7 @@ export interface ConnectionDTO {
 }
 
 export class ConnectionService {
-  static async getConnections(
-    userId: string,
-    params: { cursor?: string; limit?: number },
-  ): Promise<{ items: ConnectionDTO[]; nextCursor: string | null }> {
-    const limit = Math.min(Math.max(params.limit || 20, 1), 50);
-
+  static async getBlockedUserIds(userId: string): Promise<Set<string>> {
     const blocks = await prisma.block.findMany({
       where: {
         OR: [{ blockerId: userId }, { blockedId: userId }],
@@ -49,6 +44,32 @@ export class ConnectionService {
       if (b.blockerId === userId) blockedUserIds.add(b.blockedId);
       if (b.blockedId === userId) blockedUserIds.add(b.blockerId);
     }
+    return blockedUserIds;
+  }
+
+  static getConnectionsWhereInput(userId: string, blockedUserIds: Set<string>): Prisma.ConnectionWhereInput {
+    return {
+      OR: [{ userAId: userId }, { userBId: userId }],
+      AND: [
+        { userAId: { notIn: Array.from(blockedUserIds) } },
+        { userBId: { notIn: Array.from(blockedUserIds) } },
+      ],
+    };
+  }
+
+  static async getConnectionsCount(userId: string, blockedUserIds?: Set<string>): Promise<number> {
+    const blocked = blockedUserIds ?? await ConnectionService.getBlockedUserIds(userId);
+    const whereConditions = ConnectionService.getConnectionsWhereInput(userId, blocked);
+    return prisma.connection.count({ where: whereConditions });
+  }
+
+  static async getConnections(
+    userId: string,
+    params: { cursor?: string; limit?: number },
+  ): Promise<{ items: ConnectionDTO[]; nextCursor: string | null }> {
+    const limit = Math.min(Math.max(params.limit || 20, 1), 50);
+
+    const blockedUserIds = await ConnectionService.getBlockedUserIds(userId);
 
     let recentCursor: RecentCursorPayload | null = null;
     if (params.cursor) {
@@ -56,21 +77,26 @@ export class ConnectionService {
     }
     const cursorObj = recentCursor ? { createdAt: new Date(recentCursor.createdAt), id: recentCursor.id } : null;
 
-    const whereConditions: Prisma.ConnectionWhereInput = {
-      OR: [{ userAId: userId }, { userBId: userId }],
-      AND: [
-        { userAId: { notIn: Array.from(blockedUserIds) } },
-        { userBId: { notIn: Array.from(blockedUserIds) } },
-      ],
-      ...(cursorObj
-        ? {
-            OR: [
-              { createdAt: { lt: cursorObj.createdAt } },
-              { createdAt: cursorObj.createdAt, id: { lt: cursorObj.id } },
-            ],
-          }
-        : {}),
-    };
+    const baseWhere = ConnectionService.getConnectionsWhereInput(userId, blockedUserIds);
+    const existingAnd = Array.isArray(baseWhere.AND)
+      ? baseWhere.AND
+      : baseWhere.AND
+      ? [baseWhere.AND]
+      : [];
+    const whereConditions: Prisma.ConnectionWhereInput = cursorObj
+      ? {
+          ...baseWhere,
+          AND: [
+            ...existingAnd,
+            {
+              OR: [
+                { createdAt: { lt: cursorObj.createdAt } },
+                { createdAt: cursorObj.createdAt, id: { lt: cursorObj.id } },
+              ],
+            },
+          ],
+        }
+      : baseWhere;
 
     let records = await prisma.connection.findMany({
       where: whereConditions,
@@ -107,9 +133,9 @@ export class ConnectionService {
 
     const items: ConnectionDTO[] = records.map((conn) => {
       const isUserA = conn.userAId === userId;
-      const otherUser: any = isUserA ? conn.userB : conn.userA;
-      const otherProfile: any = otherUser.profile || {};
-      const verifications: any[] = otherUser.verificationRecords || [];
+      const otherUser = isUserA ? conn.userB : conn.userA;
+      const otherProfile = otherUser?.profile;
+      const verifications = otherUser?.verificationRecords || [];
 
       const badges: string[] = [];
       for (const v of verifications) {
@@ -129,10 +155,10 @@ export class ConnectionService {
         },
         otherUser: {
           id: otherUser.id,
-          name: otherProfile.name || 'Anonymous User',
-          city: otherProfile.city || null,
-          industry: otherProfile.industry || null,
-          skills: parseSkillsArray(otherProfile.skills),
+          name: otherProfile?.name || 'Anonymous User',
+          city: otherProfile?.city || null,
+          industry: otherProfile?.industry || null,
+          skills: parseSkillsArray(otherProfile?.skills),
           badges,
         },
         iHaveShared: isUserA ? conn.contactSharedA : conn.contactSharedB,
@@ -193,9 +219,9 @@ export class ConnectionService {
       throw AppError.notFound('Connection not found');
     }
 
-    const otherUser: any = isUserA ? conn.userB : conn.userA;
-    const otherProfile: any = otherUser.profile || {};
-    const verifications: any[] = otherUser.verificationRecords || [];
+    const otherUser = isUserA ? conn.userB : conn.userA;
+    const otherProfile = otherUser?.profile;
+    const verifications = otherUser?.verificationRecords || [];
 
     const badges: string[] = [];
     for (const v of verifications) {
@@ -207,19 +233,19 @@ export class ConnectionService {
     const req = conn.interest.requirement;
     const mutualShare = conn.contactSharedA && conn.contactSharedB;
 
-    const otherUserDTO: any = {
+    const otherUserDTO: ConnectionDTO['otherUser'] = {
       id: otherUser.id,
-      name: otherProfile.name || 'Anonymous User',
-      city: otherProfile.city || null,
-      industry: otherProfile.industry || null,
-      skills: parseSkillsArray(otherProfile.skills),
+      name: otherProfile?.name || 'Anonymous User',
+      city: otherProfile?.city || null,
+      industry: otherProfile?.industry || null,
+      skills: parseSkillsArray(otherProfile?.skills),
       badges,
     };
 
     if (mutualShare) {
-      const phoneNorm = normalizePhone(otherProfile.shareablePhone);
+      const phoneNorm = normalizePhone(otherProfile?.shareablePhone);
       if (phoneNorm) otherUserDTO.shareablePhone = phoneNorm;
-      if (otherProfile.shareableEmail) otherUserDTO.shareableEmail = otherProfile.shareableEmail;
+      if (otherProfile?.shareableEmail) otherUserDTO.shareableEmail = otherProfile.shareableEmail;
     }
 
     return {

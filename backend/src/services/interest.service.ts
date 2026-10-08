@@ -14,6 +14,7 @@ export interface InterestDTO {
   score: number | null;
   breakdown: any;
   reasons: string[];
+  connectionId?: string | null;
   candidate?: {
     id: string;
     name: string;
@@ -135,7 +136,7 @@ export class InterestService {
           breakdown: {
             components: scoreRes.breakdown,
             reasons: scoreRes.reasons,
-          } as any,
+          } as Prisma.InputJsonObject,
         },
       });
 
@@ -147,7 +148,7 @@ export class InterestService {
         breakdown: scoreRes.breakdown,
         reasons: scoreRes.reasons,
       };
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
         throw AppError.conflict('Interest already submitted for this requirement');
       }
@@ -272,6 +273,174 @@ export class InterestService {
     return { items, nextCursor };
   }
 
+  static async getReceivedInterests(
+    ownerId: string,
+    params: { status?: string; requirementId?: string; cursor?: string; limit?: number },
+  ): Promise<{ items: InterestDTO[]; nextCursor: string | null }> {
+    const limit = Math.min(Math.max(params.limit || 20, 1), 50);
+
+    if (params.requirementId) {
+      const req = await prisma.requirement.findUnique({
+        where: { id: params.requirementId },
+        select: { ownerId: true },
+      });
+      if (!req || req.ownerId !== ownerId) {
+        return { items: [], nextCursor: null };
+      }
+    }
+
+    const blocks = await prisma.block.findMany({
+      where: {
+        OR: [{ blockerId: ownerId }, { blockedId: ownerId }],
+      },
+    });
+    const blockedCandidateIds = new Set<string>();
+    for (const b of blocks) {
+      if (b.blockerId === ownerId) blockedCandidateIds.add(b.blockedId);
+      if (b.blockedId === ownerId) blockedCandidateIds.add(b.blockerId);
+    }
+
+    let recentCursor: RecentCursorPayload | null = null;
+    if (params.cursor) {
+      recentCursor = decodeCursor(params.cursor, 'recent') as RecentCursorPayload;
+    }
+    const cursorObj = recentCursor ? { createdAt: new Date(recentCursor.createdAt), id: recentCursor.id } : null;
+
+    const whereConditions: Prisma.InterestWhereInput = {
+      requirement: {
+        ownerId,
+        ...(params.requirementId ? { id: params.requirementId } : {}),
+      },
+      candidateId: { notIn: Array.from(blockedCandidateIds) },
+      ...(params.status ? { status: params.status as InterestStatus } : {}),
+      ...(cursorObj
+        ? {
+            OR: [
+              { createdAt: { lt: cursorObj.createdAt } },
+              { createdAt: cursorObj.createdAt, id: { lt: cursorObj.id } },
+            ],
+          }
+        : {}),
+    };
+
+    let records = await prisma.interest.findMany({
+      where: whereConditions,
+      take: limit + 1,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      select: {
+        id: true,
+        status: true,
+        createdAt: true,
+        score: true,
+        breakdown: true,
+        connection: {
+          select: {
+            id: true,
+          },
+        },
+        requirement: {
+          select: {
+            id: true,
+            title: true,
+            status: true,
+          },
+        },
+        candidate: {
+          select: {
+            id: true,
+            profile: {
+              select: {
+                name: true,
+                city: true,
+                industry: true,
+                skills: true,
+                experienceYears: true,
+                previousStartup: true,
+              },
+            },
+            commitmentProfile: {
+              select: {
+                hoursPerWeek: true,
+                availability: true,
+                minMonths: true,
+                canInvestAmount: true,
+                compensationPref: true,
+                equityExpectation: true,
+                remote: true,
+              },
+            },
+            verificationRecords: {
+              select: {
+                type: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    let nextCursor: string | null = null;
+    if (records.length > limit) {
+      const nextItem = records[limit - 1];
+      nextCursor = encodeRecentCursor(nextItem.createdAt, nextItem.id);
+      records = records.slice(0, limit);
+    }
+
+    const items: InterestDTO[] = records.map((item) => {
+      const cand: any = item.candidate || {};
+      const candProfile: any = cand.profile || {};
+      const candCommitment: any = cand.commitmentProfile || null;
+      const verifications: any[] = cand.verificationRecords || [];
+
+      const badges: string[] = [];
+      for (const v of verifications) {
+        if (v.type === 'EMAIL') badges.push('EMAIL_DECLARED');
+        if (v.type === 'LINKEDIN') badges.push('LINKEDIN_LINKED');
+        if (v.type === 'PHONE') badges.push('PHONE_LINKED');
+      }
+
+      const bd: any = item.breakdown || {};
+
+      return {
+        id: item.id,
+        status: item.status,
+        createdAt: item.createdAt.toISOString(),
+        score: item.score,
+        breakdown: bd.components || bd || null,
+        reasons: bd.reasons || [],
+        connectionId: item.status === 'ACCEPTED' ? (item.connection?.id ?? null) : null,
+        requirement: {
+          id: item.requirement.id,
+          title: item.requirement.title,
+          status: item.requirement.status,
+        },
+        candidate: {
+          id: cand.id,
+          name: candProfile.name || 'Anonymous Candidate',
+          city: candProfile.city || null,
+          industry: candProfile.industry || null,
+          skills: parseSkillsArray(candProfile.skills),
+          experienceYears: candProfile.experienceYears ?? null,
+          previousStartup: candProfile.previousStartup ?? false,
+          badges,
+          commitment: candCommitment
+            ? {
+                hoursPerWeek: candCommitment.hoursPerWeek ?? null,
+                availability: candCommitment.availability || null,
+                minMonths: candCommitment.minMonths ?? null,
+                canInvestAmount: candCommitment.canInvestAmount ? Number(candCommitment.canInvestAmount) : null,
+                compensationPref: candCommitment.compensationPref || null,
+                equityExpectation: candCommitment.equityExpectation ?? null,
+                remote: candCommitment.remote ?? true,
+              }
+            : null,
+        },
+      };
+    });
+
+    return { items, nextCursor };
+  }
+
   static async getMyInterests(
     candidateId: string,
     params: { status?: string; cursor?: string; limit?: number },
@@ -316,6 +485,11 @@ export class InterestService {
       take: limit + 1,
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       include: {
+        connection: {
+          select: {
+            id: true,
+          },
+        },
         requirement: {
           include: {
             owner: {
@@ -350,6 +524,7 @@ export class InterestService {
         score: item.score,
         breakdown: bd.components || bd || null,
         reasons: bd.reasons || [],
+        connectionId: item.status === 'ACCEPTED' ? (item.connection?.id ?? null) : null,
         requirement: reqDTO,
       };
     });
@@ -361,7 +536,7 @@ export class InterestService {
     requestingUserId: string,
     interestId: string,
     action: InterestAction,
-  ): Promise<{ interest: InterestDTO; connection?: any }> {
+  ): Promise<{ interest: InterestDTO; connection?: Record<string, unknown> | null }> {
     const interest = await prisma.interest.findUnique({
       where: { id: interestId },
       include: {
@@ -455,14 +630,14 @@ export class InterestService {
       return { interest: updatedInterest!, connection };
     });
 
-    const bd: any = result.interest.breakdown || {};
+    const bd = result.interest.breakdown as Record<string, unknown> | null;
     const interestDTO: InterestDTO = {
       id: result.interest.id,
       status: result.interest.status,
       createdAt: result.interest.createdAt.toISOString(),
       score: result.interest.score,
-      breakdown: bd.components || bd || null,
-      reasons: bd.reasons || [],
+      breakdown: bd ? ((bd.components as Record<string, unknown>) || bd) : null,
+      reasons: Array.isArray(bd?.reasons) ? (bd.reasons as string[]) : [],
     };
 
     return { interest: interestDTO, connection: result.connection };

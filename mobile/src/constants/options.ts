@@ -45,6 +45,7 @@ export const VERIFICATION_LABELS = {
   EMAIL_UNVERIFIED: 'Email declared (unverified)',
   EMAIL_DECLARED: 'Email declared (unverified)',
   LINKEDIN_LINKED: 'Linked',
+  PHONE_LINKED: 'Phone Linked',
 } as const;
 
 export const INDUSTRY_SUGGESTIONS = [

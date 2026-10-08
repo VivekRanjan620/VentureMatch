@@ -145,3 +145,32 @@ All error responses strictly adhere to the following JSON shape:
 - **Rules**:
   - Requires caller to have at least one shareable contact field (`shareablePhone` or `shareableEmail`) filled in profile (`400 INVALID_INPUT` if neither is set).
   - Sets caller's share flag. Idempotent one-way action in V1.
+
+---
+
+### 8. Get Received Interests (`GET /me/received-interests`)
+- **GET** `/me/received-interests`
+- **Auth Required**: Yes (`Bearer <accessToken>`)
+- **Query Params**:
+  - `status`: optional enum (`PENDING` | `LATER` | `ACCEPTED` | `DECLINED` | `WITHDRAWN`). Default returns all statuses including `WITHDRAWN`. Invalid status -> `400 INVALID_INPUT`.
+  - `requirementId`: optional UUID string. Restricts items to a requirement owned by caller. If requirement belongs to another user, returns `{ items: [], nextCursor: null }` with 200 OK (never reveals existence). Invalid UUID -> `400 INVALID_INPUT`.
+  - `limit`: optional integer between 1 and 50 (default 20). Invalid limit -> `400 INVALID_INPUT`.
+  - `cursor`: optional opaque cursor string for pagination. Invalid or tampered cursor -> `400 INVALID_INPUT`.
+- **Response**: List of candidate interests across all requirements owned by caller, sorted newest first.
+  - Each item includes: `id`, `status`, `createdAt`, `score`, `breakdown`, `reasons`, `connectionId` (present when status is `ACCEPTED`), `requirement` subset (`{ id, title, status }`), and `candidate` safe subset.
+  - `requirement.status` is included so mobile clients can disable Accept when the requirement is `CLOSED` (`409 CONFLICT`).
+  - Interests on `CLOSED` requirements appear in this list with `requirement.status === 'CLOSED'`.
+  - Excludes interests where a block exists in either direction between owner and candidate.
+  - **Candidate Allow-list**: `candidate` object strictly contains ONLY `id`, `name`, `city`, `industry`, `skills`, `experienceYears`, `previousStartup`, `badges`, `commitment`. Never contains email, phone, or shareable contact fields.
+
+---
+
+### 9. Get Header Counts (`GET /me/counts`)
+- **GET** `/me/counts`
+- **Auth Required**: Yes (`Bearer <accessToken>`)
+- **Response**: `{ pendingReceivedInterests: number, connections: number }`
+- **Rules**:
+  - `pendingReceivedInterests`: total count of `PENDING` interests on `ACTIVE` or `PAUSED` requirements owned by caller (excludes `CLOSED` requirements and blocked pairs).
+  - `connections`: total count of active connections for caller, calculated using the exact same shared filter as `GET /connections`.
+  - Lightweight query intended to be called on tab focus.
+

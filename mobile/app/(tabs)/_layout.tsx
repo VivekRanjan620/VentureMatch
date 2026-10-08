@@ -1,13 +1,36 @@
-import React from 'react';
-import { Tabs } from 'expo-router';
+import React, { useEffect } from 'react';
+import { AppState } from 'react-native';
+import { Tabs, usePathname } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useMeCounts } from '../../src/features/requests/hooks';
 import { colors } from '../../src/theme/tokens';
 
 export default function TabsLayout() {
   const insets = useSafeAreaInsets();
   const bottomPadding = Math.max(insets.bottom, 8);
   const tabBarHeight = 56 + insets.bottom;
+
+  const pathname = usePathname();
+  const { data: countsData, refetch: refetchCounts } = useMeCounts();
+
+  // Refetch counts on pathname change or app foregrounding
+  useEffect(() => {
+    refetchCounts();
+  }, [pathname, refetchCounts]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextAppState) => {
+      if (nextAppState === 'active') {
+        refetchCounts();
+      }
+    });
+    return () => subscription.remove();
+  }, [refetchCounts]);
+
+  const pendingCount = countsData?.pendingReceivedInterests || 0;
+  const badgeText = pendingCount > 99 ? '99+' : pendingCount > 0 ? String(pendingCount) : undefined;
+  const badgeAccessibilityLabel = pendingCount > 0 ? `${pendingCount} pending requests` : 'Requests';
 
   return (
     <Tabs
@@ -67,6 +90,18 @@ export default function TabsLayout() {
         options={{
           title: 'Requests',
           headerTitle: 'Interests & Requests',
+          tabBarBadge: badgeText,
+          tabBarBadgeStyle: {
+            backgroundColor: colors.error,
+            color: colors.surface,
+            fontSize: 10,
+            fontFamily: 'DMSans_700Bold',
+            minWidth: 18,
+            height: 18,
+            borderRadius: 9,
+            lineHeight: 16,
+          },
+          tabBarAccessibilityLabel: badgeAccessibilityLabel,
           tabBarIcon: ({ focused, color, size }) => (
             <Ionicons
               name={focused ? 'people' : 'people-outline'}

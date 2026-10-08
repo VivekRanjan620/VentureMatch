@@ -14,8 +14,7 @@ import { useAuthStore } from '../src/store/auth';
 import { useMe } from '../src/features/profile/hooks';
 import { OfflineScreen } from '../src/components/OfflineScreen';
 import { colors } from '../src/theme/tokens';
-
-const queryClient = new QueryClient();
+import { queryClient } from '../src/lib/queryClient';
 
 function InitialLayout() {
   const { status, hydrate, retryHydration } = useAuthStore();
