@@ -19,6 +19,17 @@ export const errorHandler = (
     return;
   }
 
+  // Map Prisma P2003 (foreign key violation on userId when user no longer exists) to 401 UNAUTHORIZED
+  if ((err as any)?.code === 'P2003') {
+    res.status(401).json({
+      error: {
+        code: ERROR_CODES.UNAUTHORIZED,
+        message: 'Session is no longer valid',
+      },
+    });
+    return;
+  }
+
   console.error('Unhandled Server Error:', err);
 
   res.status(500).json({

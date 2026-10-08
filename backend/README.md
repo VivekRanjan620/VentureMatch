@@ -54,13 +54,27 @@ npm install
 # Push Prisma schema to MySQL
 npx prisma db push
 
-# Seed database with 5 sample users and requirements
+# Seed database with 5 sample users and requirements (NON-destructive upsert)
 npm run prisma:seed
 ```
 
 ---
 
-### 5. Start Development Server
+### 5. Database Safety & Destructive Commands Policy
+
+To protect development data from accidental deletion:
+
+- **NON-DESTRUCTIVE Seed (Default)**: `npm run prisma:seed`
+  - Uses `upsert` by email for the 5 sample users, profiles, commitment profiles, and requirements.
+  - **Never** deletes existing users or custom dev data.
+- **DESTRUCTIVE Commands**:
+  - `npx prisma migrate reset` / `npx prisma db push --force-reset`: Completely wipes all tables and schema.
+  - `npm run prisma:seed:reset`: Destructively wipes all tables before seeding. Requires `ALLOW_DB_RESET=true` in environment and `NODE_ENV != 'production'`.
+  - `npm test`: Runs integration tests against the dedicated test database (`venturematch_test`). Cleans `venturematch_test` before and after test suites. Includes a safety check that **throws a fatal error** if `DATABASE_URL` does not contain `_test`.
+
+---
+
+### 6. Start Development Server
 
 ```powershell
 npm run dev

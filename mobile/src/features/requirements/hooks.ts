@@ -30,7 +30,8 @@ export const useInfiniteRequirements = (params: BrowseParams) => {
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
     enabled: status === 'signedIn',
-    staleTime: 1000 * 60 * 2,
+    staleTime: 1000 * 30,
+    refetchOnMount: 'always',
   });
 };
 

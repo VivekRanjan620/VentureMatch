@@ -4,15 +4,19 @@ import path from 'path';
 // Load .env.test environment variables BEFORE importing Prisma
 dotenv.config({ path: path.resolve(__dirname, '../.env.test'), override: true });
 
-import { prisma } from '../src/lib/prisma';
+const dbUrl = process.env.DATABASE_URL || '';
+const dbName = dbUrl.split('/').pop()?.split('?')[0] || 'unknown';
+
+console.log(`\n==================================================`);
+console.log(`[Jest Setup] Target Database: ${dbName}`);
+console.log(`==================================================\n`);
 
 // CRITICAL SAFETY CHECK: Refuse to run tests unless DATABASE_URL contains '_test'
-const dbUrl = process.env.DATABASE_URL || '';
 if (!dbUrl.includes('_test')) {
-  console.error('FATAL ERROR: Refusing to run tests! DATABASE_URL does not contain "_test".');
-  console.error(`Current DATABASE_URL: ${dbUrl}`);
-  process.exit(1);
+  throw new Error(`FATAL SAFETY ERROR: Refusing to run tests! DATABASE_URL "${dbUrl}" does not contain "_test".`);
 }
+
+import { prisma } from '../src/lib/prisma';
 
 beforeAll(async () => {
   await cleanDatabase();

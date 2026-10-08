@@ -81,3 +81,33 @@ export function buildCreateRequirementPayload(
 
   return payload;
 }
+
+export const requirementOwnerSchema = z.object({
+  id: z.string(),
+  name: z.string().nullable().optional(),
+  city: z.string().nullable().optional(),
+  badges: z.array(z.string()).nullable().optional(),
+});
+
+export const requirementSummaryItemSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  needSkill: z.string(),
+  industry: z.string(),
+  stage: z.string(),
+  currentUsers: z.number().nullable().optional(),
+  ownerContributes: z.string().nullable().optional(),
+  offer: z.string().nullable().optional(),
+  equityOfferMax: z.number().nullable().optional(),
+  commitment: z.string().nullable().optional(),
+  location: z.string().nullable().optional(),
+  remote: z.boolean().nullable().optional(),
+  createdAt: z.string(),
+  status: z.string(),
+  visibility: z.string(),
+  startupName: z.string().nullable().optional(),
+  owner: requirementOwnerSchema.nullable().optional(),
+  score: z.number().nullable().optional(),
+  breakdown: z.record(z.any()).nullable().optional(),
+  reasons: z.array(z.string()).nullable().optional(),
+});

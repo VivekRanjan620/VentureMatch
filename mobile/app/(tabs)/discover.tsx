@@ -6,8 +6,9 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Alert,
+  AppState,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { FlashList } from '@shopify/flash-list';
 import BottomSheet from '@gorhom/bottom-sheet';
 import { Ionicons } from '@expo/vector-icons';
@@ -81,11 +82,30 @@ export default function DiscoverScreen() {
     isFetchingNextPage,
   } = useInfiniteRequirements(queryParams);
 
+  // Refetch requirements on screen focus
+  useFocusEffect(
+    useCallback(() => {
+      refetch();
+    }, [refetch])
+  );
+
+  // Refetch requirements on app foregrounding
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextAppState) => {
+      if (nextAppState === 'active') {
+        refetch();
+      }
+    });
+    return () => {
+      subscription.remove();
+    };
+  }, [refetch]);
+
   // Flatten infinite query pages into single list
   const requirementsList = useMemo(() => {
     if (!data?.pages) return [];
     return data.pages
-      .flatMap((page) => page?.requirements || [])
+      .flatMap((page) => page?.items || page?.requirements || [])
       .filter((item): item is RequirementSummaryItem => Boolean(item && item.id));
   }, [data]);
 
@@ -290,49 +310,52 @@ export default function DiscoverScreen() {
           <Button title="Retry" onPress={() => refetch()} style={styles.retryBtn} />
         </View>
       ) : (
-        <FlashList
-          ref={flashListRef}
-          data={requirementsList}
-          renderItem={renderItem}
-          keyExtractor={(item) => item.id}
-          onRefresh={refetch}
-          refreshing={isRefetching}
-          onEndReached={() => {
-            if (hasNextPage && !isFetchingNextPage) {
-              fetchNextPage();
+        <View style={styles.listContainer}>
+          <FlashList
+            ref={flashListRef}
+            data={requirementsList}
+            renderItem={renderItem}
+            keyExtractor={(item: RequirementSummaryItem) => item.id}
+            {...({ estimatedItemSize: 200 } as any)}
+            onRefresh={refetch}
+            refreshing={isRefetching}
+            onEndReached={() => {
+              if (hasNextPage && !isFetchingNextPage) {
+                fetchNextPage();
+              }
+            }}
+            onEndReachedThreshold={0.5}
+            ListFooterComponent={
+              isFetchingNextPage ? (
+                <View style={styles.footerSpinner}>
+                  <ActivityIndicator size="small" color={colors.primary} />
+                </View>
+              ) : null
             }
-          }}
-          onEndReachedThreshold={0.5}
-          ListFooterComponent={
-            isFetchingNextPage ? (
-              <View style={styles.footerSpinner}>
-                <ActivityIndicator size="small" color={colors.primary} />
+            ListEmptyComponent={
+              <View style={styles.emptyContainer}>
+                <Text style={styles.emptyTitle}>No Requirements Found</Text>
+                <Text style={styles.emptySubtitle}>
+                  {searchQuery || activeFilterCount > 0
+                    ? 'Try clearing your search query or adjusting your filters.'
+                    : 'Check back later for new co-founder requirements.'}
+                </Text>
+                {(searchQuery || activeFilterCount > 0) && (
+                  <Button
+                    title="Clear filters"
+                    variant="outline"
+                    onPress={() => {
+                      setSearchInput('');
+                      setSearchQuery('');
+                      resetFilters();
+                    }}
+                    style={styles.resetSearchBtn}
+                  />
+                )}
               </View>
-            ) : null
-          }
-          ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <Text style={styles.emptyTitle}>No Requirements Found</Text>
-              <Text style={styles.emptySubtitle}>
-                {searchQuery || activeFilterCount > 0
-                  ? 'Try clearing your search query or adjusting your filters.'
-                  : 'Check back later for new co-founder requirements.'}
-              </Text>
-              {(searchQuery || activeFilterCount > 0) && (
-                <Button
-                  title="Reset Search & Filters"
-                  variant="outline"
-                  onPress={() => {
-                    setSearchInput('');
-                    setSearchQuery('');
-                    resetFilters();
-                  }}
-                  style={styles.resetSearchBtn}
-                />
-              )}
-            </View>
-          }
-        />
+            }
+          />
+        </View>
       )}
 
       {/* Filter Bottom Sheet */}
@@ -519,5 +542,8 @@ const styles = StyleSheet.create({
   },
   resetSearchBtn: {
     minWidth: 180,
+  },
+  listContainer: {
+    flex: 1,
   },
 });

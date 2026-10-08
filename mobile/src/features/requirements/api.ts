@@ -8,6 +8,8 @@ import {
   FilterState,
 } from './types';
 
+import { requirementSummaryItemSchema } from './schemas';
+
 export interface BrowseParams extends FilterState {
   sort?: 'recent' | 'match';
   cursor?: string;
@@ -15,7 +17,8 @@ export interface BrowseParams extends FilterState {
 }
 
 export interface BrowseResponse {
-  requirements: RequirementSummaryItem[];
+  items: RequirementSummaryItem[];
+  requirements?: RequirementSummaryItem[];
   nextCursor: string | null;
 }
 
@@ -51,7 +54,39 @@ export const browseRequirementsApi = async (params: BrowseParams): Promise<Brows
   }
 
   const queryString = queryParts.length > 0 ? `?${queryParts.join('&')}` : '';
-  return apiRequest<BrowseResponse>(`/requirements${queryString}`, { method: 'GET' });
+  const url = `/requirements${queryString}`;
+  const rawResponse = await apiRequest<any>(url, { method: 'GET' });
+  const rawItems = rawResponse.items || rawResponse.requirements || [];
+
+  const parsedItems: RequirementSummaryItem[] = [];
+
+  for (const rawItem of rawItems) {
+    const parseResult = requirementSummaryItemSchema.safeParse(rawItem);
+    if (parseResult.success) {
+      parsedItems.push(parseResult.data as unknown as RequirementSummaryItem);
+    } else {
+      if (__DEV__) {
+        console.warn(
+          '[Requirement Schema Warning] Item parse issue:',
+          parseResult.error.format(),
+          rawItem
+        );
+      }
+      if (rawItem && typeof rawItem === 'object' && rawItem.id) {
+        parsedItems.push(rawItem as RequirementSummaryItem);
+      }
+    }
+  }
+
+  if (__DEV__ && parsedItems.length < rawItems.length) {
+    console.warn('[Requirement Schema Warning] Some raw requirement items had schema validation warnings');
+  }
+
+  return {
+    items: parsedItems,
+    requirements: parsedItems,
+    nextCursor: rawResponse.nextCursor ?? null,
+  };
 };
 
 export const getRequirementByIdApi = async (id: string): Promise<{ requirement: RequirementDetailItem }> => {

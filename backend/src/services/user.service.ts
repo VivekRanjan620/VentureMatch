@@ -79,7 +79,7 @@ export class UserService {
     });
 
     if (!user) {
-      throw AppError.notFound('User not found');
+      throw AppError.unauthorized('Session is no longer valid');
     }
 
     // Format verification records

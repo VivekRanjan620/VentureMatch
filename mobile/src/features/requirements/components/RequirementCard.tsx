@@ -20,14 +20,24 @@ export const RequirementCard: React.FC<RequirementCardProps> = React.memo(
     const router = useRouter();
     const { user: currentUser } = useAuthStore();
 
-    const isOwner = currentUser?.id === item.owner.id;
+    const isOwner = Boolean(currentUser?.id && item.owner?.id && currentUser.id === item.owner.id);
 
-    // Resolve labels
-    const skillLabel = SKILL_OPTIONS.find((s) => s.value === item.needSkill)?.label || item.needSkill;
-    const stageLabel = STAGE_OPTIONS.find((s) => s.value === item.stage)?.label || item.stage;
+    // Resolve labels safely
+    const skillLabel = item.needSkill
+      ? SKILL_OPTIONS.find((s) => s.value === item.needSkill)?.label || item.needSkill
+      : 'General';
+    const stageLabel = item.stage
+      ? STAGE_OPTIONS.find((s) => s.value === item.stage)?.label || item.stage
+      : null;
     const commitmentLabel = item.commitment
       ? AVAILABILITY_OPTIONS.find((a) => a.value === item.commitment)?.label || item.commitment
       : null;
+
+    const metaParts = [
+      stageLabel,
+      item.industry,
+      item.currentUsers !== null && item.currentUsers !== undefined ? `${item.currentUsers} users` : null,
+    ].filter(Boolean);
 
     const handleInterestPress = async () => {
       if (hasSentInterest || isOwner || isExpressingInterest) return;
@@ -37,6 +47,9 @@ export const RequirementCard: React.FC<RequirementCardProps> = React.memo(
     const handleDetailsPress = () => {
       router.push(`/requirements/${item.id}`);
     };
+
+    const ownerName = item.owner?.name || 'Anonymous Founder';
+    const ownerCity = item.owner?.city ? ` (${item.owner.city})` : '';
 
     return (
       <View style={styles.card}>
@@ -53,9 +66,11 @@ export const RequirementCard: React.FC<RequirementCardProps> = React.memo(
         </Text>
 
         {/* Meta Line: stage · industry · currentUsers users */}
-        <Text style={styles.metaLine}>
-          {stageLabel} · {item.industry} · {item.currentUsers} users
-        </Text>
+        {metaParts.length > 0 && (
+          <Text style={styles.metaLine}>
+            {metaParts.join(' · ')}
+          </Text>
+        )}
 
         {/* Chips Row */}
         <View style={styles.chipRow}>
@@ -69,13 +84,9 @@ export const RequirementCard: React.FC<RequirementCardProps> = React.memo(
             </View>
           ) : null}
 
-          {item.remote ? (
+          {item.remote !== null && item.remote !== undefined && (
             <View style={styles.chip}>
-              <Text style={styles.chipText}>Remote</Text>
-            </View>
-          ) : (
-            <View style={styles.chip}>
-              <Text style={styles.chipText}>On-site</Text>
+              <Text style={styles.chipText}>{item.remote ? 'Remote' : 'On-site'}</Text>
             </View>
           )}
         </View>
@@ -107,8 +118,8 @@ export const RequirementCard: React.FC<RequirementCardProps> = React.memo(
         {/* Owner Info */}
         <View style={styles.ownerRow}>
           <Text style={styles.ownerText}>
-            Posted by <Text style={styles.ownerName}>{item.owner.name}</Text>
-            {item.owner.city ? ` (${item.owner.city})` : ''}
+            Posted by <Text style={styles.ownerName}>{ownerName}</Text>
+            {ownerCity}
           </Text>
         </View>
 

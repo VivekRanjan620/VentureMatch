@@ -23,26 +23,26 @@ export interface RequirementSummaryItem {
   needSkill: SkillType;
   industry: string;
   stage: StageType;
-  currentUsers: number;
+  currentUsers?: number | null;
   ownerContributes?: string | null;
   offer?: string | null;
   equityOfferMax?: number | null;
   commitment?: AvailabilityType | null;
   location?: string | null;
-  remote: boolean;
+  remote?: boolean | null;
   createdAt: string;
   status: RequirementStatusType;
   visibility: VisibilityType;
   startupName?: string | null;
   owner: {
     id: string;
-    name: string;
+    name?: string | null;
     city?: string | null;
-    badges: string[];
+    badges?: string[] | null;
   };
   score?: number | null;
-  breakdown?: ScoreBreakdown;
-  reasons?: string[];
+  breakdown?: ScoreBreakdown | null;
+  reasons?: string[] | null;
 }
 
 export interface RequirementDetailItem extends RequirementSummaryItem {

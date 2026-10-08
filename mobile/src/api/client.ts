@@ -76,8 +76,11 @@ export async function apiRequest<T = any>(
   const isAuthEndpoint = endpoint.startsWith('/auth/');
   const fullUrl = endpoint.startsWith('http') ? endpoint : `${BASE_URL}${endpoint.startsWith('/') ? '' : '/'}${endpoint}`;
 
+  const method = (restOptions.method || 'GET').toUpperCase();
+
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
+    ...(method === 'GET' ? { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' } : {}),
     ...(customHeaders as Record<string, string>),
   };
 

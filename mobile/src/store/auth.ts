@@ -3,6 +3,7 @@ import { User, Tokens } from '../api/types';
 import { saveTokens, getTokens, clearTokens } from '../lib/secureStorage';
 import { apiRequest } from '../api/client';
 import { ApiError } from '../lib/errors';
+import { useRequirementFilterStore } from '../features/requirements/store';
 
 export type AuthStatus = 'loading' | 'signedOut' | 'signedIn' | 'networkError';
 
@@ -21,6 +22,11 @@ export interface AuthState {
   logout: () => Promise<void>;
 }
 
+const clearRequirementFilters = () => {
+  useRequirementFilterStore.getState().resetFilters();
+  useRequirementFilterStore.getState().setSearchQuery('');
+};
+
 export const useAuthStore = create<AuthState>((set, get) => ({
   accessToken: null,
   refreshToken: null,
@@ -32,6 +38,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       const { accessToken, refreshToken } = await getTokens();
       if (!accessToken || !refreshToken) {
+        clearRequirementFilters();
         set({ accessToken: null, refreshToken: null, user: null, status: 'signedOut' });
         return;
       }
@@ -46,6 +53,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         if (err.status === 401 || err.status === 403) {
           // Explicit server rejection -> clear session
           await clearTokens();
+          clearRequirementFilters();
           set({ accessToken: null, refreshToken: null, user: null, status: 'signedOut' });
           return;
         }
@@ -56,6 +64,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         }
       }
       // Default fallback for unexpected errors
+      clearRequirementFilters();
       set({ status: 'signedOut' });
     }
   },
@@ -84,6 +93,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   handleAuthFailure: async () => {
     await clearTokens();
+    clearRequirementFilters();
     set({ accessToken: null, refreshToken: null, user: null, status: 'signedOut' });
   },
 
@@ -103,6 +113,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
 
     await clearTokens();
+    clearRequirementFilters();
     set({ accessToken: null, refreshToken: null, user: null, status: 'signedOut' });
   },
 }));

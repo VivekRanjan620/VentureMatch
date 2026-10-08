@@ -39,7 +39,7 @@ export default function RequirementDetailScreen() {
   const [serverError, setServerError] = useState<string | null>(null);
 
   const requirement = data?.requirement;
-  const isOwner = currentUser?.id === requirement?.owner.id;
+  const isOwner = Boolean(currentUser?.id && requirement?.owner?.id && currentUser.id === requirement.owner.id);
 
   // Set of requirement IDs caller has sent interest to
   const sentInterestIds = useMemo(() => {
@@ -104,17 +104,31 @@ export default function RequirementDetailScreen() {
     );
   }
 
-  // Resolve options
-  const skillLabel = SKILL_OPTIONS.find((s) => s.value === requirement.needSkill)?.label || requirement.needSkill;
-  const stageLabel = STAGE_OPTIONS.find((s) => s.value === requirement.stage)?.label || requirement.stage;
+  // Resolve options safely
+  const skillLabel = requirement.needSkill
+    ? SKILL_OPTIONS.find((s) => s.value === requirement.needSkill)?.label || requirement.needSkill
+    : 'General';
+  const stageLabel = requirement.stage
+    ? STAGE_OPTIONS.find((s) => s.value === requirement.stage)?.label || requirement.stage
+    : null;
   const commitmentLabel = requirement.commitment
     ? AVAILABILITY_OPTIONS.find((a) => a.value === requirement.commitment)?.label || requirement.commitment
     : 'N/A';
 
+  const metaParts = [
+    stageLabel,
+    requirement.industry,
+    requirement.currentUsers !== null && requirement.currentUsers !== undefined
+      ? `${requirement.currentUsers} users`
+      : null,
+  ].filter(Boolean);
+
   // Verification badges
-  const verificationBadges = requirement.owner.badges || [];
-  const hasEmailBadge = verificationBadges.includes('EMAIL');
-  const hasLinkedinBadge = verificationBadges.includes('LINKEDIN');
+  const verificationBadges = requirement.owner?.badges || [];
+  const hasEmailBadge = verificationBadges.includes('EMAIL') || verificationBadges.includes('EMAIL_DECLARED');
+  const hasLinkedinBadge = verificationBadges.includes('LINKEDIN') || verificationBadges.includes('LINKEDIN_LINKED');
+
+  const ownerName = requirement.owner?.name || 'Anonymous Founder';
 
   // Recommendation score breakdown rows helper
   const breakdown = requirement.breakdown || {};
@@ -138,14 +152,16 @@ export default function RequirementDetailScreen() {
         ) : null}
 
         <Text style={styles.title}>{requirement.title}</Text>
-        <Text style={styles.metaLine}>
-          {stageLabel} · {requirement.industry} · {requirement.currentUsers} users
-        </Text>
+        {metaParts.length > 0 && (
+          <Text style={styles.metaLine}>
+            {metaParts.join(' · ')}
+          </Text>
+        )}
 
         {/* Owner Card Info */}
         <View style={styles.ownerHeader}>
-          <Text style={styles.ownerTitle}>Posted by {requirement.owner.name}</Text>
-          {requirement.owner.city ? (
+          <Text style={styles.ownerTitle}>Posted by {ownerName}</Text>
+          {requirement.owner?.city ? (
             <Text style={styles.ownerSub}>📍 {requirement.owner.city}</Text>
           ) : null}
 

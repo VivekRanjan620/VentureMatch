@@ -1,5 +1,6 @@
 import request from 'supertest';
 import app from '../src/app';
+import { prisma } from '../src/lib/prisma';
 
 describe('User Profile & Commitment Endpoints', () => {
   let accessToken: string;
@@ -166,5 +167,60 @@ describe('User Profile & Commitment Endpoints', () => {
         }),
       ]),
     );
+  });
+
+  it('should return 401 UNAUTHORIZED when user row no longer exists in DB', async () => {
+    const meRes = await request(app)
+      .get('/api/v1/me')
+      .set('Authorization', `Bearer ${accessToken}`);
+    const userId = meRes.body.user.id;
+
+    // Delete user from database
+    await prisma.user.delete({ where: { id: userId } });
+
+    // GET /me for deleted user
+    const getDeletedRes = await request(app)
+      .get('/api/v1/me')
+      .set('Authorization', `Bearer ${accessToken}`);
+
+    expect(getDeletedRes.status).toBe(401);
+    expect(getDeletedRes.body.error.code).toBe('UNAUTHORIZED');
+    expect(getDeletedRes.body.error.message).toBe('Session is no longer valid');
+
+    // PUT /me for deleted user (triggers Prisma P2003 FK violation)
+    const putDeletedRes = await request(app)
+      .put('/api/v1/me')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({
+        name: 'Deleted User',
+        city: 'Boston, MA',
+        industry: 'Software',
+        skills: ['TECH'],
+        experienceYears: 5,
+      });
+
+    expect(putDeletedRes.status).toBe(401);
+    expect(putDeletedRes.body.error.code).toBe('UNAUTHORIZED');
+    expect(putDeletedRes.body.error.message).toBe('Session is no longer valid');
+  });
+
+  it('should disable HTTP caching (etag false, Cache-Control no-store) and return 200 with body on repeated GET /me calls', async () => {
+    const res1 = await request(app)
+      .get('/api/v1/me')
+      .set('Authorization', `Bearer ${accessToken}`);
+
+    expect(res1.status).toBe(200);
+    expect(res1.headers['cache-control']).toBe('no-store');
+    expect(res1.headers['etag']).toBeUndefined();
+    expect(res1.body.user).toBeDefined();
+
+    const res2 = await request(app)
+      .get('/api/v1/me')
+      .set('Authorization', `Bearer ${accessToken}`);
+
+    expect(res2.status).toBe(200);
+    expect(res2.headers['cache-control']).toBe('no-store');
+    expect(res2.headers['etag']).toBeUndefined();
+    expect(res2.body.user).toBeDefined();
   });
 });

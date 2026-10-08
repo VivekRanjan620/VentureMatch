@@ -37,24 +37,24 @@ export interface RequirementSummary {
   needSkill: string;
   industry: string;
   stage: string;
-  currentUsers: number;
+  currentUsers?: number | null;
   ownerContributes?: string | null;
   offer?: string | null;
   equityOfferMax?: number | null;
   commitment?: string | null;
   location?: string | null;
-  remote: boolean;
+  remote?: boolean | null;
   createdAt: string;
   status: string;
   visibility: string;
   startupName?: string | null;
   owner: {
     id: string;
-    name: string;
+    name?: string | null;
     city?: string | null;
-    badges: string[];
+    badges?: string[] | null;
   };
   score?: number | null;
   breakdown?: any;
-  reasons?: string[];
+  reasons?: string[] | null;
 }

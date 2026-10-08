@@ -9,6 +9,9 @@ import { env } from './config/env';
 
 const app = express();
 
+// Disable HTTP ETags to prevent 304 empty body responses
+app.set('etag', false);
+
 if (env.TRUST_PROXY) {
   app.set('trust proxy', 1);
 }
@@ -18,6 +21,12 @@ app.use(helmet());
 app.use(cors());
 app.use(express.json());
 app.use(requestLogger);
+
+// Enforce no-cache on all /api/v1 responses
+app.use('/api/v1', (_req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store');
+  next();
+});
 
 // API v1 Routes
 app.use('/api/v1', routes);
